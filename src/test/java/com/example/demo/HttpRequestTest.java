@@ -19,6 +19,9 @@ public class HttpRequestTest {
     @Autowired
     private TestRestTemplate restTemplate;
 
+    /**
+     * Test GET /user/{name}/mood
+     */
     @Test
     public void defaultMood()  {
         Mood expected = new Mood("stehrn", "no mood");
@@ -26,6 +29,9 @@ public class HttpRequestTest {
                 Mood.class)).isEqualTo(expected);
     }
 
+    /**
+     * Test PUT /user/{name}/mood "<current mood>"
+     */
     @Test
     public void setMood()  {
         String mood  = "happy";
