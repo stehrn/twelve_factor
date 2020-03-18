@@ -1,4 +1,4 @@
-package com.example.demo;
+package com.github.stehrn.mood;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;

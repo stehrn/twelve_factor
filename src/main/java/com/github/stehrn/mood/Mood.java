@@ -1,4 +1,4 @@
-package com.example.demo;
+package com.github.stehrn.mood;
 
 import java.util.Objects;
 

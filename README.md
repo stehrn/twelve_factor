@@ -2,9 +2,9 @@
 
 This is a practical look at [12 factor](https://12factor.net) apps and how to build them for real. Its based on several years experience across a number of large financial organisations in teams with a strong focus on engineering and doing things well.     
 
-This is part one of a two part series looking at the first 6 factors. 
+This is part one of a two part series covering about half the factors. 
 
-We'll use a Java ([Spring Boot](https://spring.io/projects/spring-boot)) based app, [docker](https://www.docker.com), [kubernetes](https://kubernetes.io) (and a bit of [OpenShift](https://www.openshift.com)) to demonstrate the different approaches. So heavy focus on containers, but cloud based services provide options as well, and these will be noted.
+Different approaches will be explored through the use of a Java ([Spring Boot](https://spring.io/projects/spring-boot)) based app, [docker](https://www.docker.com), [kubernetes](https://kubernetes.io) (and a bit of [OpenShift](https://www.openshift.com)). So heavy focus on containers, but cloud based services provide options as well, and these will be noted.
 
 Source is available in [twelve_factor](https://github.com/stehrn/twelve_factor) github repo
 
@@ -14,9 +14,9 @@ Our app is the beginnings of a simple agle scrum _moodboard_, microservice based
 GET /user/<user>/mood/
 PUT /user/<user>/mood/
 ```
-Implemented as a Spring Boot Java app  - as usual, super quick and easy to get started, helped by [Spring Initializr](https://start.spring.io) which was used to generate based project and pom. 
+Implemented as a Spring Boot Java app  - as usual, super quick and easy to get started, helped by [Spring Initializr](https://start.spring.io) which was used to generate template project and pom. 
 
-Run [HttpRequestTest.java](src/test/java/com/example/demo/HttpRequestTest.java) to test the 2 end points, or test via curl, bring up app first:
+Run [HttpRequestTest.java](src/test/java/com/github/stehrn/mood/HttpRequestTest.java) to test the 2 end points, or test via curl, bring up app first:
 ```cmd
 $ mvn package
 $ mvn spring-boot:run
@@ -51,18 +51,17 @@ Possible ways to explicitly declare such dependencies include:
 
 
 ## (Factor 3) Config - store config in the environment (not in the code)
-The initial version the the demo app has a bit of config defined in [application.properties](src/main/resources/application.properties) to set the default mood. Its read in [MoodService.java](MoodService.java) via:
+The initial version the the demo app has a bit of config defined in [application.properties](src/main/resources/application.properties) to set the 404 message when no mood set for user. Its read in [MoodService.java](MoodService.java) via:
 ```java
-@Value("${default_mood}")
-private String defaultMood;
+@Value("${mood_not_found_message}")
+private String moodNotFoundMessage;
 ```
 So right now it appears its hard coded, to change the value requires us to rebuild the app. But we're in luck, Spring Boot will also detect environment variables, treating them as properties, we just need to `export` the new value:
 ```cmd
-$ export default_mood="no mood has been set for this user"
+$ export mood_not_found_message="no mood has been set for this user"
 $ mvn spring-boot:run
 $ curl http://localhost:8080/user/stehrn/mood
-
-{"user":"stehrn","mood":"no mood has been set for this user"}
+{... "status":404, "message":"no mood has been set for this user"}
 ```
 
 Spring provides _config as a service_ via [Spring Cloud Config](https://cloud.spring.io/spring-cloud-config/reference/html/), which enables the discovery of application properties via a service running on a different part of the network. It's ok...if you're using Spring.    
@@ -78,7 +77,7 @@ Pre-requisite is we've created a far jar for the app:
 ```cmd
 $ mvn package
 ```
-Next [build](https://docs.docker.com/engine/reference/commandline/build/) the container image from the [Dockerfile](docker/Dockerfile) and tag it with `latest`. Note the Dockerfile uses the [ENV](https://docs.docker.com/engine/reference/builder/#env) command to set `default_mood` 
+Next [build](https://docs.docker.com/engine/reference/commandline/build/) the container image from the [Dockerfile](docker/Dockerfile) and tag it with `latest`. Note the Dockerfile uses the [ENV](https://docs.docker.com/engine/reference/builder/#env) command to set `mood_not_found_message` 
 ```cmd
 $ cd docker
 $ docker build --file Dockerfile --tag mood-app:latest .
@@ -102,11 +101,14 @@ Lets override this with a value injected in at runtime, when the container start
 ```cmd
 $ docker stop mood
 $ docker rm mood
-$ docker run --name mood --detach --publish 8080:8080 --env default_mood="runtime default for docker" mood-app:latest
+$ docker run --name mood --detach --publish 8080:8080 --env mood_not_found_message="runtime default for docker" mood-app:latest
 $ curl http://localhost:8080/user/stehrn/mood
-{"user":"stehrn","mood":"runtime default for docker"}
+{... "status":404, "message":"runtime default for docker"}
+
 ```
 That's as simple as containers get. So when do we we use one approach over the other for setting env variables? Creating the container image is something that generally happens at _build_ time. When we're ready to ship the latest version, a _release_ is created for one or more target envs. Given the application will need to be configured differently for each env, we dont want to encode anything into the binary, unless its a common default applicable to _all_ envs, otherwise best policy is to inject env variables in at runtime. 
+
+Of course, passing in variables via the command line wont cut it in all but trivial apps, sourcing from files is another option (Docker support this), but lets hold off, since most real world apps wont be running docker directly, but rather a higher level container orchestration platform like kubernetes, which we'll come to in a bit and re-visit config.   
  
 
 ## (Factor 4) Backing Services - treat Backing Services as attached resources 

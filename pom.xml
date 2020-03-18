@@ -55,7 +55,7 @@
 							<goal>repackage</goal>
 						</goals>
 						<configuration>
-							<mainClass>com.example.demo.Application</mainClass>
+							<mainClass>com.github.stehrn.mood.Application</mainClass>
 							<outputDirectory>${project.basedir}/docker</outputDirectory>
 						</configuration>
 					</execution>

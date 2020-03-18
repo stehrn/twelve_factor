@@ -1,4 +1,4 @@
-package com.example.demo;
+package com.github.stehrn.mood;
 
 import org.junit.jupiter.api.Test;
 
@@ -7,6 +7,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.boot.web.server.LocalServerPort;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -23,10 +25,10 @@ public class HttpRequestTest {
      * Test GET /user/{name}/mood
      */
     @Test
-    public void defaultMood()  {
-        Mood expected = new Mood("stehrn", "no mood");
-        assertThat(this.restTemplate.getForObject("http://localhost:" + port + "/user/stehrn/mood",
-                Mood.class)).isEqualTo(expected);
+    public void notFoundCodeReturnedWhenMoodNotSetForUser()  {
+        ResponseEntity responseEntity = this.restTemplate.getForEntity("http://localhost:" + port + "/user/stehrn/mood",
+                Mood.class);
+        assertThat(responseEntity.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 
     /**
