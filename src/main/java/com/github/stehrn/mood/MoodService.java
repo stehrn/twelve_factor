@@ -3,26 +3,28 @@ package com.github.stehrn.mood;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.Optional;
 
 @Service
 class MoodService {
 
-    private final Map<String, String> moods = new ConcurrentHashMap<>();
-
     @Value("${mood_not_found_message}")
     private String moodNotFoundMessage;
 
-    String getMood(String user) {
-        String mood = moods.get(user);
-        if (mood == null) {
-            throw new MoodNotSetException(moodNotFoundMessage);
-        }
-        return mood;
+    private MoodRepository moodRepository;
+    MoodService(MoodRepository moodRepository) {
+        this.moodRepository = moodRepository;
     }
 
-    String setMood(String user, String mood) {
-        return moods.put(user, mood);
+    Mood getMood(String user) {
+        Optional<Mood> mood = moodRepository.findById(user);
+        if(!mood.isPresent()) {
+            throw new MoodNotSetException(moodNotFoundMessage);
+        }
+        return mood.get();
+    }
+
+    Mood setMood(String user, String mood) {
+        return moodRepository.save(Mood.builder().user(user).mood(mood).build());
     }
 }

@@ -11,7 +11,7 @@ public class MoodController {
 
     @GetMapping("/user/{name}/mood")
     public Mood getMood(@PathVariable(value = "name") String name) {
-        return new Mood(name, moodService.getMood(name));
+        return moodService.getMood(name);
     }
 
     @PutMapping("/user/{name}/mood")
