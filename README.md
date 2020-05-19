@@ -7,7 +7,7 @@ A simple Java microservice app is evolved architecturally, from a single process
 This is part one of a two part series covering about half the factors and all source is available in [twelve_factor](https://github.com/stehrn/twelve_factor) GitHub repo
  
 ## Introducing the demo app
-Our demo app is the beginnings of a simple agle scrum _moodboard_, implemented as a microservice based architecture that has the following end points to get and set a users mood:
+The demo app is the beginnings of a simple agile scrum _moodboard_, implemented as a microservice based architecture that has the following end-points to get and set the mood of the given user:
 ```
 GET /user/<user>/mood/
 PUT /user/<user>/mood/
@@ -65,7 +65,7 @@ The initial version the the demo app has a bit of config defined in [application
 ```
 mood_not_found_message=no mood
 ```
-Its read in [MoodService.java](MoodService.java) via:
+Its read in [MoodService](MoodService.java) via:
 ```java
 @Value("${mood_not_found_message}")
 private String moodNotFoundMessage;
@@ -83,48 +83,47 @@ Spring also provides _config as a service_ via [Spring Cloud Config](https://clo
 ## Process 
 [Execute the app as one or more stateless processes](https://12factor.net/processes) (12 factor)
 
-State exists in the demo app, in the form of a simple in-process cache in [MoodService.java](src/main/java/com/github/stehrn/mood/MoodService.java). So how to get state out of the app process? The answer is to introduce a _backing service_ and store state there. 
+State exists in the demo app, in the form of a simple in-process cache in [MoodService](src/main/java/com/github/stehrn/mood/MoodService.java). So how to get state out of the app process? The answer is to introduce a _backing service_ and store state there instead. 
 
-Why bother? If we want to _scale out_ our process and create multiple instances running on different servers across a network (yes, a distributed app), then having no state makes things much easier - you just run the process on another host. 
+Why bother? If we want to _scale out_ our process and create multiple instances to facilitate things like load balancing and application resilience, then having no state makes things much easier - just spin up another instance of the application process. 
 
 So how do we do this for our app? [redis](https://redis.io) is a good choice, defined on its website as "an in-memory data structure store, used as a database, cache and message broker ... supports data structures such as strings, hashes, lists, sets, ...". Its a great bit of opensource with a strong community, so lets use it; alternatives might include Hazelcast or memcached.
 
 #### Running redis on docker
 The quickest and easiest way to install and run redis is using docker, the [run](https://docs.docker.com/engine/reference/commandline/run/) command starts the redis container:
+```cmd
+$ docker run --name mood-redis --publish 6379:6379 --detach redis
 ```
-$ docker run --name mood-redis -p 6379:6379 -d redis
-```
-(port forwarding is set so that we can connect to the container using port 6379)
+The redis port is published so the app can connect it from outside of the container - we'll discuss `--publish` (`-p`) in more detail later.
 
-To check the running process and tail the logs:
-```
+We used `--detach` (`-d`) to run the container process in the background, to check the running process and tail the logs:
+```cmd
 $ docker ps
 $ docker logs --follow mood-redis
 ```
 The log should show the message `Ready to accept connections`, default logging does not actually tell us much, so lets get a bit more interactive using the redis command line interface [(redis-cli)](https://redis.io/topics/rediscli). 
 
 To access redis-cli via docker, open an interactive (`it`) shell against the running redis container and run the `redis-cli` command:  
-```
-docker exec -it mood-redis sh -c redis-cli 
+```cmd
+$ docker exec -it mood-redis sh -c redis-cli 
 ``` 
 Use the [`monitor`](https://redis.io/topics/rediscli#monitoring-commands-executed-in-redis) command to actively monitor the commands running against redis - it will just print out `OK` to begin with, we'll see more once the Spring Boot app is connected to redis. 
 
 #### Connecting Spring Boot to redis
 Lets replace the existing in memory cache with a redis cache using [Spring Data Redis](https://docs.spring.io/spring-data/data-redis/docs/current/reference/html/#reference), not many changes are required:  
 * [`RedisConfig`](src/main/java/com/github/stehrn/mood/RedisConfig.java) has been added to provide relevant redis configuration information for Spring to connect to redis, it includes a `RedisTemplate` Spring Data bean uses to interact with the Redis server and a `RedisConnectionFactory`
-* The addition of `@RedisHash("user")` to [`Mood`](src/main/java/com/github/stehrn/mood/Mood.java) tells Spring to store the mood data in redis and not its default `KeyValue` store 
+* The addition of `@RedisHash("user")` to [`Mood`](src/main/java/com/github/stehrn/mood/Mood.java) tells Spring to store the mood entity in redis and not its default `KeyValue` store 
 
-In a new terminal, start the Spring app (on port 8090):
+Start app:
 ```
-export SERVER_PORT=8090
 mvn spring-boot:run
 ```
 ...and set a new mood
 ```
-$ curl -X PUT  -H "Content-Type: text/plain" -d "liking redis" -i http://localhost:${SERVER_PORT}/user/stehrn/mood 
+$ curl -X PUT  -H "Content-Type: text/plain" -d "liking redis" -i http://localhost:8080/user/stehrn/mood 
 HTTP/1.1 200 
 
-$ curl http://localhost:${SERVER_PORT}/user/stehrn/mood
+$ curl http://localhost:8080/user/stehrn/mood
 {"user":"stehrn","mood":"liking redis"}
 ``` 
 The redis monitor should show something like this:
@@ -137,16 +136,17 @@ Two keys are added:
 * `user:stehrn` maps to a hash data structure containing the mood dat; the [HMSET](https://redis.io/commands/hmset) command sets specified fields (`_class`, `user`, and `mood`) to their respective values. Note how redis also ensures any previous value is deleted via [DEL](https://redis.io/commands/del)  
 * `user` maps to a set containing unique users, [SADD](https://redis.io/commands/sadd) is used to add an item the set 
 
-Now, in a separate terminal, fire up a new spring boot process on a different port and verify we can get back the same mood for given user:
+Now, in a separate terminal, fire up a new spring boot process (will need to be on a different port to avoid a clash) and verify we can get back the same mood from the redis backing service for given user:
 ```
 $ export SERVER_PORT=8095
 $ mvn spring-boot:run
 $ curl http://localhost:${SERVER_PORT}/user/stehrn/mood
 {"user":"stehrn","mood":"liking redis"}
 ``` 
+So we now have two stateless processes leveraging a redis backing service to store application state, nice!
 
 #### Back to redis-cli to check contents of store
-Go back to the redis-cli terminal (come of of monitor using Ctrl-C), to list all keys: 
+Go back to the redis-cli terminal (come out of monitor using Ctrl-C), to list all keys: 
 ```
 > keys *
 1) "user:stehrn"
@@ -168,10 +168,26 @@ See all users:
 1) "stehrn"
 ``` 
 
-#### Running demo app on docker
-Now is a good time to put the Spring Boot app into a Docker container, before you start kill off any instances running from a terminal. 
+#### Running mood app on docker
+Now is a good time to put the mood app into a Docker container. We first need to change the redis container since we're now in the world of inter-container communication (or networking) and need to change a few things to make it possible for the containers to communicate with each other.   
 
-Pre-requisite is a far jar has been created for the app:
+##### Retrofit redis container so app container can connect 
+We'll make use of a user defined [bridge network](https://docs.docker.com/network/bridge/), its good security practice as ensures only related services/containers can communicate with each other.
+
+Create a new network:
+```cmd
+$ docker network create mood-network
+```
+Restart redis, connecting the container to the `mood-network` network and give it a network alias called `redis-cache` (think of this as the 'hostname' the app container will use):
+```cmd
+$ docker stop mood-redis && docker rm mood-redis
+$ docker run -n mood-redis --network mood-network -p 6379:6379 --net-alias redis-cache -d redis
+``` 
+
+##### Create and run app container
+Now to create and run the app container - before starting kill off any app instances running from a terminal to avoid port clashes. 
+
+Pre-requisite is that a far jar has been created for the app:
 ```cmd
 $ mvn package
 ```
@@ -196,37 +212,77 @@ mood-app            latest              2fe60c820c21        3 minutes ago       
 ```
 Note the size, its pretty big for such a simple app, we'll come back to that in a later post when looking at _disposability_
 
-Next run a container based on the new image, give it the name `mood`, and publish its `8080` port so we can connect:
+Next run a container based on the new app image, give it the name `mood-app`, and publish its `8080` port so we can connect, and link it to the `mood-redis` container with alias `redis-cache` by setting the `spring.redis.host` env variable: 
 ```cmd
-$ docker run --name mood --detach --publish 8080:8080 mood-app:latest
-$ docker logs mood --follow
+$ docker run --name mood-app --network mood-network -p 8080:8080 --env spring.redis.host=redis-cache -d mood-app:latest
 ```
-Check new default mood not found message injected via `ENV` command is observed, note we need to pick a different user to the one we've been using (`stehrn`) since we've already set their mood and its been persisted into th redis server.  
-```cmd
-$ curl http://localhost:8080/user/josh/mood
-{"user":"josh","mood":"default for docker"}
-```
-Lets override this with a value injected in at runtime, when the container starts using `--env`: 
-```cmd
-$ docker stop mood
-$ docker rm mood
-$ docker run --name mood --detach --publish 8080:8080 --env mood_not_found_message="runtime default for docker" mood-app:latest
-$ curl http://localhost:8080/user/josh/mood
-{... "status":404, "message":"runtime default for docker"}
-
-```
-That's as simple as containers get. So when do we we use one approach over the other for setting env variables? Creating the container image is something that generally happens at _build_ time. When we're ready to ship the latest version, a _release_ is created for one or more target envs. Given the application will need to be configured differently for each env, we dont want to encode anything into the binary, unless its a common default applicable to _all_ envs, otherwise best policy is to inject env variables in at runtime. 
-
-Of course, passing in variables via the command line wont cut it in all but trivial apps, sourcing from files is another option (Docker support this), but lets hold off, since most real world apps wont be running docker directly, but rather a higher level container orchestration platform like kubernetes, which we'll come to in a bit and re-visit config.   
+At this point, we have 2 containers running, and Spring Boot app container and a redis container, the app container is linked to redis container via the `cache` alias.  
  
+Check new default mood not found message injected via `ENV` command is observed:  
+```cmd
+$ curl http://localhost:8080/user/stehrn/mood
+{..., "user":"stehrn","mood":"default for docker"}
+``` 
 
-## (Factor 4) Backing Services - treat Backing Services as attached resources 
+## Port binding 
+[Export services via port binding](https://12factor.net/port-binding)  (12 factor)
+
+We've touched on this already when we had to "publish (our service) to port 8080 so we can connect to it" - the factor is relevant to _container based_ deployments, since without explicitly publishing a port, you wont be able to connect to any process running inside the container listening on that port. It does not have to be just the HTTP protocol, it can be _any_ type of service on a network - we've used another type service, the redis cache using the redis protocol on port 6379.
+
+As we've seen, port binding in docker is achieved with the [`publish`](https://docs.docker.com/engine/reference/commandline/run/#publish-or-expose-port--p---expose) option, for the app we achieved port binding with:
+```
+--publish 8080:8080
+``` 
+Interpret this as `host:container`, this binds port 8080 of the container to TCP/HTTP port 8080 on the host machine, the Java process running inside the container is listening on port 8080, and the `publish` option will allow a connection to this port from outside of the container. The ports don't have to be the same, it's possible to publish to a different host port to the one the container process is listening to, you might do this if the other port was in use or you didn't want to reveal the "real" port number. Lets quickly test this for real:
+```
+$ docker stop mood-app && docker rm mood-app
+$ docker run -n mood-app -p 8085:8080 mood-app:latest
+```
+...will expose port 8085 on the host and map to port 8080 on the container; inside the container the embedded web server starts up on (container) port 8080:
+```
+Tomcat started on port(s): 8080 (http)
+```
+But you connect to the process via its published port 8085:
+```
+$ curl http://localhost:8085/user/stehrn/mood
+```
+So far we've been playing about in terminals using _localhost_, in a UAT or production deployment, a public facing hostname and port will be used with some routing to route requests onto a server process listening on a non public host/port - we'll see this in action when we deploy to Openshift.
+### Publish versus expose
+Its worth taking a step back and thinking about how we're currently connecting to the redis process - the app container is connecting to the redis container - i.e. container to container communication, so instead of publishing the redis port to the outside world we just need to expose it to the other container, this is safer right, from a security perspective, so lets kill the existing container and start with [`expose`](https://docs.docker.com/engine/reference/commandline/run/#publish-or-expose-port--p---expose) instead of `publish`:  
+```
+docker stop mood-redis && docker rm mood-redis 
+docker run --name mood-redis --network mood-net --expose 6379 --detach redis
+```
+
+## Backing Services  
+[Treat backing services as attached resources](https://12factor.net/backing-services) (12 factor)
+
+A backing service is any service the app consumes over the network as part of its normal operation - the redis cache is an example of a backing service that was used to take state out of the application process, the cache is loosely coupled to the mood app, accessed via a simple URL defined through the `spring.redis.host` & `spring.redis.port` properties (default resolves to `localhost:6379`). 
+
+The app knows nothing about the redis backing service - who owns it, how it was deployed, where its running - it might be running on the same node in a separate container, it might be a managed [Azure Cache for Redis](https://azure.microsoft.com/en-gb/services/cache/) service hosted in a different region. The point it, it doesn't matter, its a separation of concerns, each can be managed and deployed independently from each other.
+
+The app deployment can be easily configured to use a different redis instance simply by changing some environment properties - nothing else needs to be done. Lets quickly bring up an alternative version of redis and attach it to the mood app, we'll use the [alpine version](https://hub.docker.com/_/redis/) of redis that has a smaller image size (note we bind it to a different host port to avoid a clash with the existing redis published on 6379): 
+```
+docker run --name mood-redis-alpine --publish 6380:6379 --detach redis:6.0.3-alpine
+```
+Now bring up app container against this instance just by changing the URL (in this case, just the port needs to be modified):
+```
+--env spring.redis.port=6380
+TODO
+```
+ 
+## Dependencies
+Lets come back to [explicitly declare and isolate dependencies](https://12factor.net/dependencies) (12 factor)
+
+The mood app depends on the redis cache defined through the backing service URL being available at runtime. How do we do this? The answer depends on how the application is architected. One style is the _single node_ pattern - defined as groups of containers co-located on a single machine. This is the pattern we used above already by starting two containers on the same machine, but that involved manually running docker commands, how do we encode this into something that explicitly defines the target state? 
+
+TODO: docker
+https://docs.docker.com/compose/    
+
 
 ## (Factor 5) Build, release, run - strictly separate stages
  
 
-xxx
-## Dependencies 
 
 #### Resources
 We can take this a step further and think about dependencies to other resources and how to make sure they are available when an application runs. Things that belong to the application ecoystem, their lifecycle matches that of the app (think UML composite aggregation, the black diamond, if a composite is deleted, all other parts associated with it are deleted). A clue is based on _responsibility_, these are generally resources the app team are responsible for as well. This could include things like a database, distributed cache, or microservices; it would not include any shared services (e.g. logging or security) or third party dependencies. 
@@ -250,3 +306,31 @@ xxx
 * https://www.ionos.com/community/hosting/redis/using-redis-in-docker-containers/
 * https://docs.spring.io/spring-data/data-redis/docs/current/reference/html/#reference
 * https://www.contino.io/insights/building-a-twelve-factor-application-part-one
+
+Sign up for free here.
+https://www.openshift.com/products/online/
+
+- 2GiB memory for your applications
+- 2GiB persistent storage for your applications
+- 60-day duration
+
+
+
+### Env Variables
+So which approach to use for setting env variables? Creating the container image is something that generally happens at _build_ time. When we're ready to ship the latest version, a _release_ is created for one or more target envs. Given the application will need to be configured differently for each env, we dont want to encode anything into the binary, unless its a common default applicable to _all_ envs, otherwise best policy is to inject env variables in at runtime. 
+
+Of course, passing in variables via the command line wont cut it in all but trivial apps, sourcing from files is another option (Docker supports this), but lets hold off, since most real world apps wont be running docker directly, but rather a higher level container orchestration platform like kubernetes, which we'll come to in a bit and re-visit config.   
+
+
+xxx
+
+
+"..on port 8080 on the Docker host, so external clients can access that port"
+
+
+
+
+
+docker network inspect new-mood-network
+
+xxx
