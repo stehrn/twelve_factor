@@ -56,7 +56,7 @@ The demo app uses maven for dependencies management, defined in `dependencies` s
 ```
 (_the versions for this dependency, if you were wondering, are inherited from the parent pom_)
 
-Dependencies with _provided_ scope are worth a special mention - these wont be packaged into your distribution, the assumption been they will be provided at runtime, so how then to define this in the runtime? This is where containers help, we'll come back to an example below where we define a runtime dependency inside a docker container. 
+Dependencies with _provided_ scope are worth a special mention - these wont be packaged into your distribution, the assumption been they will be provided at runtime, so how then to define this in the runtime? This is where containers help, we'll come back to an example below where we define runtime dependencies inside a docker container. 
 
 ## Config 
 [store config in the environment (not in the code)](https://12factor.net/config) (12 factor)
@@ -78,12 +78,12 @@ $ curl http://localhost:8080/user/stehrn/mood
 {... "status":404, "message":"no mood has been set for this user"}
 ```
 
-Spring also provides _config as a service_ via [Spring Cloud Config](https://cloud.spring.io/spring-cloud-config/reference/html/) - this goes well beyond just storing config in the environment the process is running within - it enables the discovery of application properties via a service running on a different part of the network. It's an alternative option..._if_ you're using Spring, the techniques we'll go through below are framework agnostic and therefore preferable.     
+Spring also provides _config as a service_ via [Spring Cloud Config](https://cloud.spring.io/spring-cloud-config/reference/html/) - this goes well beyond just storing config in the environment the process is running within - it enables the discovery of application properties via a service running on a different part of the network. It's an alternative option..._if_ you're using Spring, the other techniques we'll go through below are framework agnostic and therefore preferable.     
 
-## Process 
+## Process and State
 [Execute the app as one or more stateless processes](https://12factor.net/processes) (12 factor)
 
-State exists in the demo app, in the form of a simple in-process cache in [MoodService](src/main/java/com/github/stehrn/mood/MoodService.java). So how to get state out of the app process? The answer is to introduce a _backing service_ and store state there instead. 
+State exists in the demo app, in the form of a simple in-process cache in [MoodService](src/main/java/com/github/stehrn/mood/MoodService.java) - so how to get this state out of the app process? The answer is to introduce a [backing service](https://12factor.net/backing-services) and store state there instead, backing services gets its own section below, for now you just need to know its any type of service the app conusumes as part of its normal operation and is defined via a simple connection string.   
 
 Why bother? If we want to _scale out_ our process and create multiple instances to facilitate things like load balancing and application resilience, then having no state makes things much easier - just spin up another instance of the application process. 
 
@@ -94,9 +94,9 @@ The quickest and easiest way to install and run redis is using docker, the [run]
 ```cmd
 $ docker run --name mood-redis --publish 6379:6379 --detach redis
 ```
-The redis port is published so the app can connect it from outside of the container - we'll discuss `--publish` (`-p`) in more detail later.
+`--publish` (`-p`) publishes the redis port so the app can connect it from outside of the container (more on this later).
 
-We used `--detach` (`-d`) to run the container process in the background, to check the running process and tail the logs:
+`--detach` (`-d`) runs the container process in the background, to check the running process and tail the logs:
 ```cmd
 $ docker ps
 $ docker logs --follow mood-redis
@@ -145,7 +145,7 @@ $ curl http://localhost:${SERVER_PORT}/user/stehrn/mood
 ``` 
 So we now have two stateless processes leveraging a redis backing service to store application state, nice!
 
-#### Back to redis-cli to check contents of store
+#### Sidebar: Back to redis-cli to check contents of store
 Go back to the redis-cli terminal (come out of monitor using Ctrl-C), to list all keys: 
 ```
 > keys *
@@ -168,6 +168,30 @@ See all users:
 1) "stehrn"
 ``` 
 
+## Backing Services  
+[Treat backing services as attached resources](https://12factor.net/backing-services) (12 factor)
+
+A backing service is any service the app consumes over the network as part of its normal operation - the redis cache is an example of a backing service that was used to take state out of the application process, the cache is loosely coupled to the mood app, accessed via a simple URL defined through the `spring.redis.host` & `spring.redis.port` properties (default values in [application.properties](src/main/resources/application.properties) resolve to `localhost:6379`). 
+
+The app knows nothing about the redis backing service - who owns it, how it was deployed, where its running - it might be running on the same node in a separate container, it might be a managed [Azure Cache for Redis](https://azure.microsoft.com/en-gb/services/cache/) service hosted in a different region. The point it, it doesn't matter, its a separation of concerns, each can be managed and deployed independently from each other.
+
+The app deployment can be easily configured to use a different redis instance simply by changing some environment properties - nothing else needs to be done. Lets quickly bring up an alternative version of redis and attach it to the mood app, we'll use the [alpine version](https://hub.docker.com/_/redis/) of redis that has a smaller image size (note we bind it to a different host port to avoid a clash with the existing redis published on 6379): 
+```cmd
+$ docker run --name mood-redis-alpine -p 6380:6379 -d redis:6.0.3-alpine
+```
+Now restart one of the two running app process in the terminal, but re-configure it to connect to the new version of redis simply by changing the URL (in this case just the redis port needs to be modified):
+```cmd
+$ mvn spring-boot:run -Dspring-boot.run.arguments=--spring.redis.port=6380
+```
+..and test as you did before, note since this is a brand new redis instance, it will have no data so you'll need to do a PUT then GET.
+
+## Process and execution
+[Execute the app as one or more stateless processes](https://12factor.net/processes) (12 factor)
+
+We've addressed process and state, making it much simpler to spin up the app process by storing state in a backing service, but what about process _execution_.
+
+TODO: talk about containers as a way to manage things here.
+
 #### Running mood app on docker
 Now is a good time to put the mood app into a Docker container. We first need to change the redis container since we're now in the world of inter-container communication (or networking) and need to change a few things to make it possible for the containers to communicate with each other.   
 
@@ -181,7 +205,7 @@ $ docker network create mood-network
 Restart redis, connecting the container to the `mood-network` network and give it a network alias called `redis-cache` (think of this as the 'hostname' the app container will use):
 ```cmd
 $ docker stop mood-redis && docker rm mood-redis
-$ docker run -n mood-redis --network mood-network -p 6379:6379 --net-alias redis-cache -d redis
+$ docker run --name mood-redis --network mood-network --net-alias redis-cache -p 6379:6379 -d redis
 ``` 
 
 ##### Create and run app container
@@ -210,19 +234,23 @@ $ docker image ls mood-app
 REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
 mood-app            latest              2fe60c820c21        3 minutes ago       103MB
 ```
-Note the size, its pretty big for such a simple app, we'll come back to that in a later post when looking at _disposability_
+Note the size, its pretty big for such a simple app, we'll come back to that when looking at _disposability_.
 
-Next run a container based on the new app image, give it the name `mood-app`, and publish its `8080` port so we can connect, and link it to the `mood-redis` container with alias `redis-cache` by setting the `spring.redis.host` env variable: 
+Next run a container named `mood-app` based on the new app image, publish its 8080 port so we can connect externally, and set the redis host property to the network alias of the `mood-redis` container: 
 ```cmd
 $ docker run --name mood-app --network mood-network -p 8080:8080 --env spring.redis.host=redis-cache -d mood-app:latest
 ```
-At this point, we have 2 containers running, and Spring Boot app container and a redis container, the app container is linked to redis container via the `cache` alias.  
- 
-Check new default mood not found message injected via `ENV` command is observed:  
+At this point, we have 2 containers running, a stateless (Spring Boot) app container and a redis container acting as a backing service; check new default mood not found message injected via `ENV` command is observed:  
 ```cmd
 $ curl http://localhost:8080/user/stehrn/mood
 {..., "user":"stehrn","mood":"default for docker"}
 ``` 
+
+TODO: improve above?
+
+TODO: this may be set from before?
+
+TODO: docker network inspect new-mood-network
 
 ## Port binding 
 [Export services via port binding](https://12factor.net/port-binding)  (12 factor)
@@ -236,40 +264,41 @@ As we've seen, port binding in docker is achieved with the [`publish`](https://d
 Interpret this as `host:container`, this binds port 8080 of the container to TCP/HTTP port 8080 on the host machine, the Java process running inside the container is listening on port 8080, and the `publish` option will allow a connection to this port from outside of the container. The ports don't have to be the same, it's possible to publish to a different host port to the one the container process is listening to, you might do this if the other port was in use or you didn't want to reveal the "real" port number. Lets quickly test this for real:
 ```
 $ docker stop mood-app && docker rm mood-app
-$ docker run -n mood-app -p 8085:8080 mood-app:latest
+$ docker run --name mood-app --network mood-network -p 8085:8080 --env spring.redis.host=redis-cache -d mood-app:latest
 ```
-...will expose port 8085 on the host and map to port 8080 on the container; inside the container the embedded web server starts up on (container) port 8080:
+`-p 8085:8080` will expose port 8085 on the host and map to port 8080 on the container, inside the container the embedded web server starts up on (container) port 8080:
 ```
 Tomcat started on port(s): 8080 (http)
 ```
-But you connect to the process via its published port 8085:
+...but we externally connect to the container process via its published port 8085:
 ```
 $ curl http://localhost:8085/user/stehrn/mood
 ```
 So far we've been playing about in terminals using _localhost_, in a UAT or production deployment, a public facing hostname and port will be used with some routing to route requests onto a server process listening on a non public host/port - we'll see this in action when we deploy to Openshift.
 ### Publish versus expose
 Its worth taking a step back and thinking about how we're currently connecting to the redis process - the app container is connecting to the redis container - i.e. container to container communication, so instead of publishing the redis port to the outside world we just need to expose it to the other container, this is safer right, from a security perspective, so lets kill the existing container and start with [`expose`](https://docs.docker.com/engine/reference/commandline/run/#publish-or-expose-port--p---expose) instead of `publish`:  
+```cmd
+$ docker stop mood-redis && docker rm mood-redis 
+$ docker run --name mood-redis --network mood-network --net-alias redis-cache --expose 6379 -d redis
 ```
-docker stop mood-redis && docker rm mood-redis 
-docker run --name mood-redis --network mood-net --expose 6379 --detach redis
+...and test:
+```cmd
+$ curl http://localhost:8085/user/stehrn/mood
 ```
+ 
+## Concurrency  
+[Scale out via the process model](https://12factor.net/concurrency) (12 factor)
 
-## Backing Services  
-[Treat backing services as attached resources](https://12factor.net/backing-services) (12 factor)
+Adding more concurrency is a case of spinning up a new process - this is essentially horizontal scaling, a single JVM can only be increased so much until it hits the physical memory limits of the machine, so if you want to handle higher loads then the application must be able to span multiple processes running on multiple physical machines - i.e. scale out and become a distributed application.
 
-A backing service is any service the app consumes over the network as part of its normal operation - the redis cache is an example of a backing service that was used to take state out of the application process, the cache is loosely coupled to the mood app, accessed via a simple URL defined through the `spring.redis.host` & `spring.redis.port` properties (default resolves to `localhost:6379`). 
+Different processes can be assigned a type - HTTP requests may be handled by a web process, and long-running background tasks handled by a worker process, and different types of process can be scaled differently - e.g. you may have three load balanced web processes and ten worker processes.
 
-The app knows nothing about the redis backing service - who owns it, how it was deployed, where its running - it might be running on the same node in a separate container, it might be a managed [Azure Cache for Redis](https://azure.microsoft.com/en-gb/services/cache/) service hosted in a different region. The point it, it doesn't matter, its a separation of concerns, each can be managed and deployed independently from each other.
+Back to our app, we want to be able to scale it out, but how? Containers and container orchestration is the answer.
 
-The app deployment can be easily configured to use a different redis instance simply by changing some environment properties - nothing else needs to be done. Lets quickly bring up an alternative version of redis and attach it to the mood app, we'll use the [alpine version](https://hub.docker.com/_/redis/) of redis that has a smaller image size (note we bind it to a different host port to avoid a clash with the existing redis published on 6379): 
-```
-docker run --name mood-redis-alpine --publish 6380:6379 --detach redis:6.0.3-alpine
-```
-Now bring up app container against this instance just by changing the URL (in this case, just the port needs to be modified):
-```
---env spring.redis.port=6380
-TODO
-```
+TODO: more detail here.
+
+We've already made it simpler to spin up the app process by using a backing service to take away state, the next step is to run it in a container...      
+
  
 ## Dependencies
 Lets come back to [explicitly declare and isolate dependencies](https://12factor.net/dependencies) (12 factor)
