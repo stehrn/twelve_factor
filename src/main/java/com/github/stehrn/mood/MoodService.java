@@ -1,10 +1,12 @@
 package com.github.stehrn.mood;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.Optional;
 
+@Slf4j
 @Service
 class MoodService {
 
@@ -12,6 +14,7 @@ class MoodService {
     private String moodNotFoundMessage;
 
     private MoodRepository moodRepository;
+
     MoodService(MoodRepository moodRepository) {
         this.moodRepository = moodRepository;
     }
@@ -25,6 +28,7 @@ class MoodService {
     }
 
     Mood setMood(String user, String mood) {
+        log.info("Setting mood for {} to {}", user, mood);
         return moodRepository.save(Mood.builder().user(user).mood(mood).build());
     }
 }

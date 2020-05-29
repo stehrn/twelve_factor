@@ -79,13 +79,16 @@ Its read in [MoodService](MoodService.java) via:
 @Value("${mood_not_found_message}")
 private String moodNotFoundMessage;
 ```
-So right now it appears its hard coded, to change the value requires us to rebuild the app. But we're in luck, Spring Boot will also detect environment variables, treating them as properties, we just need to `export` the new value into the env before starting the process:
-```cmd
+So right now it appears its hard coded, to change the value requires us to rebuild the app. But what if we wanted to have different configurations based on the deployment environment (e.g. development/test/production or some other variant)?     
+
+We're in luck, Spring Boot will detect _environment variables_ (treating them as properties), we just need to `export` the value before starting the process:
+ ```cmd
 $ export mood_not_found_message="no mood has been set for this user"
 $ mvn spring-boot:run
 $ curl http://localhost:8080/user/stehrn/mood
 {... "status":404, "message":"no mood has been set for this user"}
 ```
+Environment variables are easy to change and independent of programming language and development framework, and having configuration external to the code enables the same version of the binary to be deployed to each environment, just with different runtime configurations. 
 
 Spring also provides _config as a service_ via [Spring Cloud Config](https://cloud.spring.io/spring-cloud-config/reference/html/) - this goes well beyond just storing config in the environment the process is running within - it enables the discovery of application properties via a service running on a different part of the network. It's an alternative option..._if_ you're using Spring, the other techniques we'll go through below are framework agnostic and therefore preferable.     
 
@@ -199,11 +202,13 @@ So with no code changes, just a change to an environment property, we've managed
 ## Containers and dependencies
 [explicitly declare and isolate dependencies](https://12factor.net/dependencies) (12 factor)
 
-Lets revisit dependencies - we can manage build-time library dependencies declaratively, but things are less clear with runtime dependencies; this is where containers can help since they provide: 
+Lets revisit dependencies - we can manage build-time library dependencies declaratively using dependency management tools, but things are less clear when it comes to isolation of runtime dependencies - this is where containers can help since they provide: 
  
-"... a standard unit of software that packages up code and all its dependencies so the application runs quickly and reliably from one computing environment to another ... a container image is a lightweight, standalone, executable package of software that includes everything needed to run an application: code, runtime, system tools, system libraries and settings." ([docker.com](https://www.docker.com/resources/what-container))
+"... a standard unit of software that packages up code and all its dependencies so the application runs quickly and reliably from one computing environment to another ... a container image is a standalone, executable package of software that includes everything needed to run an application: code, runtime, system tools, system libraries and settings." ([docker.com](https://www.docker.com/resources/what-container))
 
-We've seen this first hand with the redis container - the image had everything needed to run redis - we did not need to install or configure anything else. So lets ship our app inside a container so that we have 100% certainty it has everything that's needed for it to run as expected - including 'provided' scoped dependencies.  
+We've seen this first hand with the redis container - the image had everything needed to run redis, nothing else was installed or configured. 
+
+So lets ship the app inside a container so we have 100% certainty it has everything that's needed for it to run as expected (including any 'provided' scoped dependencies that can be dropped into the container), regardless of the runtime environment - I want the container I'm running and testing on my dev blade to work just the same way on a production cluster.  
  
 ## Running service on docker
 The redis container needs a bit of a retrofit first since we're now in the world of inter-container communication (or networking) and need to configure things so the containers can communicate with each other.   
@@ -239,13 +244,13 @@ ENV mood_not_found_message default for docker
 # run application with this command line
 CMD ["/usr/bin/java", "-jar", "-Dspring.profiles.active=default", "/app.jar"]
 ``` 
-To [build](https://docs.docker.com/engine/reference/commandline/build/) a container image (called `mood-app`, tagged it with `latest`) from the Dockerfile, run the following commands:
+To [build](https://docs.docker.com/engine/reference/commandline/build/) a container image (called `mood-app`, tagged it with `1.0.0`) from the Dockerfile, run the following commands:
 ```cmd
 $ cd docker
-$ docker build --file Dockerfile --tag mood-app:latest .
+$ docker build --file Dockerfile --tag mood-app:1.0.0 .
 $ docker image ls mood-app
 REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
-mood-app            latest              2fe60c820c21        3 minutes ago       103MB
+mood-app            1.0.0              2fe60c820c21        3 minutes ago       103MB
 ```
 Note the size, its pretty big for such a simple app, we'll come back to that when looking at _disposability_.
 
@@ -253,7 +258,7 @@ There's actually better ways to build the image, things have been kept simple he
 
 Next run a container named `mood-app` based on the new service image, publish its 8080 port so we can connect externally, and set the redis host property to the network alias of the `mood-redis` container: 
 ```cmd
-$ docker run --name mood-app --network mood-network -p 8080:8080 --env spring.redis.host=redis-cache -d mood-app:latest
+$ docker run --name mood-app --network mood-network -p 8080:8080 --env spring.redis.host=redis-cache -d mood-app:1.0.0
 ```
 At this point there are two containers running: a stateless (Spring Boot) service container and a redis container acting as a backing service. 
 
@@ -283,7 +288,7 @@ Interpret this as `host:container`, this binds port 8080 of the container to TCP
 
 Lets quickly test this for real:
 ```
-$ docker run --name mood-app-ports --network mood-network -p 8085:8080 --env spring.redis.host=redis-cache -d mood-app:latest
+$ docker run --name mood-app-ports --network mood-network -p 8085:8080 --env spring.redis.host=redis-cache -d mood-app:1.0.0
 ```
 `-p 8085:8080` will expose port 8085 on the host and map to port 8080 on the container, inside the container the embedded web server starts up on (container) port 8080:
 ```
@@ -318,9 +323,69 @@ Lets come back to [explicitly declare and isolate dependencies](https://12factor
 
 The service depends on the redis cache being available at runtime - how to ensure its running and available? The answer depends on how the application is architected. One style is the single node pattern - defined as groups of containers co-located on a single machine. This is the pattern used above already by starting two containers on the same (local developer) machine - its a pattern that would fit _if_ we were responsible for both the service and the redis cache. Lets assume we are responsible, so how do we manage their deployment? The answer, you guessed it, is an orchestration framework like Kubernetes.    
   
-## Running service on Kubernetes  
-TODO: define config. https://docs.docker.com/compose/
-  
+## Running containers on Kubernetes
+Before proceeding, kill off anything that's running either in your terminals or in background on docker, that's legacy now, we're moving on up to container orchestration!
+```cmd
+$ TODO 
+```  
+Docker Desktop includes a standalone [Kubernetes server](https://docs.docker.com/get-started/orchestration/) that runs on your machine, we're going to use this to manage our containers, and the `kubectl` (pronounced “cube CTL”, “kube control”) command line interface to run commands against Kubernetes. 
+
+Containers are scheduled as [`pods`](https://kubernetes.io/docs/concepts/workloads/pods/), which are groups of co-located containers that share some resources. Pods themselves are almost always scheduled as [`deployments`](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/), which are scalable groups of pods maintained automatically. 
+
+All Kubernetes objects can are defined in YAML files that describe all the components and configurations of the app. [mood-app.yaml](docker/mood-app.yaml) defines our mood application, it has:
+* [Deployment](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/), describing a scalable group of identical pods. In this case, you’ll get just one replica, or copy of your pod, and that pod (which is described under the template: key) has just one container in it, based off of your bulletinboard:1.0 image from the previous step in this tutorial.
+* [NodePort](https://kubernetes.io/docs/concepts/services-networking/service/#nodeport) service, which will route traffic from port 8080 on your host to port 8080 inside the pods it routes to, allowing you to reach your bulletin board from the network.
+
+TODO: change above
+
+Deploy application to Kubernetes:
+```cmd
+$ kubectl apply -f mood-app.yaml
+```
+and check its ready:
+```cmd
+$ kubectl get deployments
+NAME       READY   UP-TO-DATE   AVAILABLE   AGE
+mood-app   1/1     1            1           19s
+```
+Logs can be tailed with:
+```cmd
+$ kubectl logs --selector=app=service --container mood-app --follow
+```
+(change `--container` (`-c`) to `mood-redis` to tail redis logs)
+
+Once again test the service:
+```cmd
+$ curl -X PUT -H "Content-Type: text/plain" -d "happy" http://localhost:30001/user/stehrn/mood 
+$ curl http://localhost:30001/user/stehrn/mood
+{"user":"stehrn","mood":"happy"}
+```
+
+### Web Dashboard
+A nice feature is the [web-ui-dashboard](https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/), install:
+```cmd
+$ kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.0.0/aio/deploy/recommended.yaml
+```
+..and run:
+```cmd
+$ kubectl proxy
+```
+Open via [localhost link](http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/.)
+
+Use token from below command to log in: 
+```cmd
+$ kubectl -n kube-system describe secret default
+```
+..and you should see 
+TODO: image
+
+And tidy up by tearing down the application:
+```cmd
+$ kubectl delete -f mood-app.yaml
+```  
+
+Check out [deploy to Kubernetes](https://docs.docker.com/get-started/kube-deploy/) for more detail.
+
 ## Concurrency  
 [Scale out via the process model](https://12factor.net/concurrency) (12 factor)
 
