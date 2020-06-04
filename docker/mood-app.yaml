@@ -15,10 +15,19 @@ spec:
     spec:
       containers:
         - name: mood-service
-          image: mood-app:1.0.0
+          image: mood-service:1.0.0
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 800m
+              memory: 1Gi
           env:
             - name: spring.redis.host
               value: "mood-redis"
+            - name: mood_not_found_message
+              value: "default for Kubernetes"
 ---
 apiVersion: v1
 kind: Service
