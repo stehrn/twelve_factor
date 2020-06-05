@@ -1,7 +1,6 @@
 package com.github.stehrn.mood;
 
 import org.junit.jupiter.api.Test;
-
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
@@ -12,7 +11,7 @@ import org.springframework.http.ResponseEntity;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
+@SpringBootTest(classes = TestRedisConfiguration.class, webEnvironment = WebEnvironment.RANDOM_PORT)
 public class HttpRequestTest {
 
     @LocalServerPort
@@ -26,7 +25,7 @@ public class HttpRequestTest {
      */
     @Test
     public void notFoundCodeReturnedWhenMoodNotSetForUser()  {
-        ResponseEntity responseEntity = this.restTemplate.getForEntity("http://localhost:" + port + "/user/stehrn/mood",
+        ResponseEntity responseEntity = restTemplate.getForEntity("http://localhost:" + port + "/user/stehrn/mood",
                 Mood.class);
         assertThat(responseEntity.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
@@ -39,11 +38,11 @@ public class HttpRequestTest {
         String mood  = "happy";
         String user  = "stehrn";
 
-        this.restTemplate.put("http://localhost:" + port + "/user/" + user + "/mood", mood,
+        restTemplate.put("http://localhost:" + port + "/user/" + user + "/mood", mood,
                 String.class);
 
         Mood expected = new Mood(user, mood);
-        assertThat(this.restTemplate.getForObject("http://localhost:" + port + "/user/" + user + "/mood",
+        assertThat(restTemplate.getForObject("http://localhost:" + port + "/user/" + user + "/mood",
                 Mood.class)).isEqualTo(expected);
     }
 }
