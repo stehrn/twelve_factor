@@ -348,9 +348,9 @@ mood-service   1/1     1            1           3s
 ```
 Logs can be tailed with:
 ```cmd
-$ kubectl logs --selector=app=service --container mood-service --follow 
+$ kubectl logs -l app=service --follow 
 ```
-(change `--container` (`-c`) to `mood-redis` to tail redis logs)
+(change `-l` to `app=redis` to tail redis logs)
 
 Once again test the service (note different port):
 ```cmd 
@@ -426,7 +426,8 @@ Note RESTARTS is 0, we brought it up before and its continued running happily si
 
 Lets now simulate the process crashing. Under the hood kubernetes spins up containers using docker, so lets go back to using the docker CLI to stop the running container:
 ```cmd
-$ docker stop `docker ps -q -f name=mood-service`
+$ export MOOD_SERVICE_CONTAINER_ID=$(docker ps -q -f name=mood-service)
+$ docker stop $MOOD_SERVICE_CONTAINER_ID 
 ```
 Right now the service is down, if someone tried it, it would fail, lets give Kubernetes a chance to detect the outage and spin up a new container...then check on the pod again:
 ```cmd
@@ -454,45 +455,110 @@ Actuator is clever enough to figure out we need redis and runs a health check to
 $ curl http://localhost:30001/actuator/health
 {"status":"UP"}
 ```
-Lets update the deployment in place using [`kubectl patch`](https://kubernetes.io/docs/tasks/run-application/update-api-object-kubectl-patch/) to apply the following HTTP request based liveness check (defined in [health-check-patch.yaml](docker/health-check-patch.yaml)) to the mood-service:
+This bit of deployment config defines an HTTP request based liveness check, it informs Kubernetes to wait 30 seconds (`initialDelaySeconds`) before performing the first probe, and then perform the probe every 30 seconds (`periodSeconds`); if the probe fails 3 times (default `failureThreshold`) the container is restarted. 
+  
 ```cmd
 livenessProbe:
   httpGet:
     path: /actuator/health
     port: 8080
   initialDelaySeconds: 15
-  periodSeconds: 5
+  periodSeconds: 30
 ```
-The `periodSeconds` specifies liveness probe is performed every 5 seconds, and `initialDelaySeconds` that Kubernetes should wait 3 seconds before performing first probe.
+Get `initialDelaySeconds` wrong and the container may never start, forever been killed and restarted before it gets a chance to start! As such, it should be set to be greater than the maximum initialisation time. There's also a probe `timeoutSeconds` which defaults to 1 second, its worth considering a small increase in response time due to temporary increase in load could result in the container being restarted.  
 
-To patch:
+A pod's [`restartPolicy`](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#restart-policy) determines what to do if a probe fails - if set to `Always` (the default) or `OnFailure`, the container will be killed and restarted if the probe fails (the other policy is `Never`)
+
+The deployment does not include a probe yet, so lets use [`kubectl patch`](https://kubernetes.io/docs/tasks/run-application/update-api-object-kubectl-patch/) to apply one to the mood-service:
 ```cmd
 $ kubectl patch deployment mood-service --patch "$(cat health-check-patch.yaml)"
 ```
-Check the patched deployment, which should now include the above:
+(see [health-check-patch.yaml](docker/health-check-patch.yaml))
+
+After applying the patch the pod will be restarted, check the patched deployment, which should now include the above probe config:
 ```cmd
 kubectl get deployment mood-service --output yaml
 ``` 
 (in practice you'd now get those changes back into version controlled deployment YAML) 
- 
-TODO. how to test health check
-Get pod name from `kubectl get pods`
-kubectl describe pod mood-service-cfc7f4b9b-2mstw
 
+Lets check things are running as expected
+```cmd
+$ export SERVICE_POD=$(kubectl get pods --selector=app=service --no-headers -o custom-columns=":metadata.name")
+$ kubectl describe pod ${SERVICE_POD} 
+```
+Look for the `Events` section, if the probe failed you'll see something like below (otherwise you wont see any probe related events):  
+```cmd
+  Type     Reason     Age                  From                     Message
+  ----     ------     ----                 ----                     -------
+  Warning  Unhealthy  10s (x3 over 1m48s)   kubelet, docker-desktop  Liveness probe failed: HTTP probe failed with statuscode: 500
+```
+..in this case probe has failed 3 times and the container has been restarted:
+```cmd
+kubectl get pods --selector=app=service
+NAME                           READY   STATUS    RESTARTS   AGE
+mood-service-d54f94b99-wvqn4   1/1     Running   1          3m35s
+```  
+(note `RESTARTS` is 1)
 
 ## Concurrency  
 [Scale out via the process model](https://12factor.net/concurrency) (12 factor)
 
-Adding more concurrency is a case of spinning up a new process - this is essentially horizontal scaling, a single JVM can only be increased so much until it hit's the physical memory limit's of the machine, so if you want to handle higher loads then the application must be able to span multiple processes running on multiple physical machines - i.e. scale out and become a distributed application.
+Adding more concurrency is a case of spinning up a new process - this is essentially horizontal scaling - to handle higher loads the application needs be able to span multiple processes running on multiple physical machines - i.e. scale out and become a distributed application.
 
 Different processes can be assigned a type - HTTP requests may be handled by a web process, and long-running background tasks handled by a worker process, and different types of process can be scaled differently - e.g. you may have three load balanced web processes and ten worker processes.
 
 Back to our app, we want to be able to scale it out, but how? Containers and container orchestration is the answer (again).
 
-TODO: set replica count, or command to dynamically scale
+zzz
+The Kubernetes control plane has the ability to scale applications based on their resource utilisation - as pods become busier, it can automatically bring up new replicas (a clone of a pod) to share the load.
+
+We already made a reference to the pod replica count 
+`replicas`
+```cmd
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mood-redis
+spec:
+  replicas: 1
+``` 
+zzz 
+
+
+Right now we just have one mood-service pod running (`replicas: 1`):  
+```cmd
+$ kubectl get deployment mood-service
+NAME           READY   UP-TO-DATE   AVAILABLE   AGE
+mood-service   1/1     1            1           24h
+
+```
+There is 1 READY & AVAILABLE pod.
+
+This can be manually increased:
+```cmd
+
+```
+
+There are a lot of good reasons for having a replica count > 1:
+* Load balancing - Kubernetes can distribute the load between the replicas (this is what the Service object is partly about)
+* High Availability - by adding a bit of redundancy, application availability has increased - e.g. if one of replica's stops responding, the others can continue to service requests  
+* Ease of Update - allows [rolling updates](https://kubernetes.io/docs/tutorials/kubernetes-basics/update/update-intro/) and zero downtime
+
+### Horizontal Autoscaling 
+Kubernetes [Horizontal Pod Autoscaler](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/)
+
+```cmd
+$ kubectl autoscale deployment mood-service --cpu-percent=50 --min=1 --max=5
+``` 
+
+```cmd
+$ kubectl run -i --tty load-generator --image=busybox /bin/sh  
+Hit enter for command prompt  
+$ while true; do wget -q -O- http://localhost:30001/user/anon/mood; done
+```
+
  
-, making them much easier to scale out independently.
- 
+Check out this nice [autoscaling blog](https://kubernetes.io/blog/2016/07/autoscaling-in-kubernetes/) for a bit more info.
  
 ## Config and Kubernetes
 You may not have noticed but the Kubernetes instance of the service had a different default message:
@@ -608,3 +674,12 @@ https://helm.sh
 
 
  then on full-blown public cloud ([Azure](https://azure.microsoft.com/en-gb/)).
+ 
+ 
+ 
+Graalvm 
+https://blog.softwaremill.com/small-fast-docker-images-using-graalvms-native-image-99c0bc92e70b
+ 
+
+Openshift
+https://console-openshift-console.apps.us-east-1.starter.openshift-online.com/k8s/cluster/projects 
