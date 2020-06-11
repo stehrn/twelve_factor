@@ -642,16 +642,16 @@ metadata:
 ..and create using `kubectl create -f <config.yaml>`
 
 # Deploying to Red Hat OpenShift
-Sign up for free [here](https://www.openshift.com/products/online/), you'll get:
+Sign up for free [here](https://www.openshift.com/products/online/) to get:
 - 2GiB memory for your applications
 - 2GiB persistent storage for your applications
 - 60-day duration
 
-Log in and you'll be presented with the admin home page 
+Log in to admin home page 
 
 ![Admin](/images/admin.png)
 
-click 'Create Project' and enter details:
+Click 'Create Project' and enter details:
 
 ![Project](/images/project.png)
 
@@ -663,49 +663,53 @@ Select 'Topology' and click 'add other content', you'll be presented with:
 
 ![Content](/images/content.png)
 
-Create the redis service from the 'redis:6.0.3-alpine' container image that was used earlier - select 'Container Image' and enter details:
+Create the redis service from the 'redis:6.0.3-alpine' container image used earlier - select 'Container Image' and enter details:
 
 ![Redis](/images/redis.png)
 
 Things of note:
-* Change the 'Application Name' to 'mood-app'
-* Change the 'Name' to 'mood-redis', this will be used for the service name, and is part of the backing service name the mood service is configured to use
+* Change 'Application Name' to 'mood-app'
+* Change 'Name' to 'mood-redis', this will be used for the service name, and is part of the backing service name the mood service will be configured to use
 * Uncheck 'Create a route to the application' as we don't want an external route to redis, just container container communication via service name
 
 Hit 'Create' and once created click on 'Resources' tab, you'll see one pod and a service exposed on port 6379: 
 
 ![Redis](/images/redis_resources.png)
 
-Now create the mood service from source code in GitHub, select 'Add' (from the right hand toolbar) and then choose 'From Git' and enter details:
+Now create the mood service from source code in GitHub, select 'Add' (from the right hand toolbar) and then choose 'From Git':
+
+![Git](/images/from_git.png)
+ 
+Enter following details:
 
 ![Mood Service](/images/mood.png)
 
 Things of note:
 * Once the `https://github.com/stehrn/twelve_factor.git` git repo is entered the UI will automatically select the correct builder image (Java) 
-* The 'mood-app' 'Application' is automatically selected
-* Change the 'Name' to 'mood-service'
+* 'Application' 'mood-app' is automatically selected, stick with it
+* Change 'Name' to 'mood-service'
 * We do want a Route creating as want a public URL we can connect to, so stick  with the default checked option
 
 At the bottom of the form, click on advanced options for 'Build Configuration' and add env variable for redis backing service:
 
 ![Mood Service](/images/mood_advanced.png)
 
-Hit 'Create' and once created click on 'Resources' tab, you'll see one pod and a service the exposes several ports, including 8080, there is also a publicly accessible route 
+Hit 'Create' and once created click on 'Resources' tab, you'll see one pod and a service that exposes several ports, including 8080, there is also a publicly accessible route: 
 
 ![Mood Service](/images/mood_resources.png)
 
-Grab the route and test things work as expected:
+There's a nice 'topology view' you can toggle to by clicking icon in top right hand side (![toggle](/images/toggle.png)):
+
+![Topology](/images/topology.png)
+
+So lets test the application, grab the public route (you can click on the ![Route](/images/route.png) icon to obtain) and test:
 ```cmd
 $ export ROUTE=http://mood-service-mood-board.apps.us-east-1.starter.openshift-online.com 
 $ curl -X PUT -H "Content-Type: text/plain" -d "happy with Openshift" ${ROUTE}/user/stehrn/mood 
 $ curl ${ROUTE}/user/stehrn/mood
 {"user":"stehrn","mood":"happy with Openshift"}
 ```
-Now is the time to spend some time in the UI clicking about to see what features are available.
-
-There's a nice 'topology view' you can toggle to by clicking icon in top right hand side (![toggle](/images/toggle.png)):
-
-![Topology](/images/topology.png)
+Now is the time to spend some time in the UI clicking about to see what features are available and reading the (very good) [OpenShift documentation](https://docs.openshift.com/online/).
 
 # Wrap up
 A lot has been covered. 
