@@ -2,9 +2,9 @@
 
 This is a practical look at [12 factor](https://12factor.net) apps and how to build them for real. 
 
-A simple Java microservice is evolved architecturally, from a single process app, to a [Docker](https://www.docker.com) containerised app, first running on the container orchestration platform [Kubernetes](https://kubernetes.io), and then rolled out to Red Hat [OpenShift](https://www.openshift.com).
+A simple Java microservice is evolved architecturally, from a single process app, to a multi process [Docker](https://www.docker.com) containerised app, first running on the container orchestration platform [Kubernetes](https://kubernetes.io), and then rolled out to Red Hat [OpenShift](https://www.openshift.com).
 
-Its hands on, with all source is available in [twelve_factor](https://github.com/stehrn/twelve_factor) GitHub repo, technical prerequisites:
+Its hands on, with all source available in [twelve_factor](https://github.com/stehrn/twelve_factor) GitHub repo, technical prerequisites:
 * JDK and maven are installed (along with a decent IDE like [IntelliJ](https://www.jetbrains.com/idea/))
 * Docker is [installed](https://docs.docker.com/get-docker/)
 
@@ -29,7 +29,7 @@ Run [HttpRequestTest](src/test/java/com/github/stehrn/mood/HttpRequestTest.java)
 $ mvn package
 $ mvn spring-boot:run
 ```
-...then set mood for user and retrieve:
+...then (in a separate terminal) set mood for a user (`stehrn`) and retrieve:
 ```cmd
 $ curl -X PUT -H "Content-Type: text/plain" -d "happy" http://localhost:8080/user/stehrn/mood 
 $ curl http://localhost:8080/user/stehrn/mood
@@ -40,9 +40,9 @@ $ curl http://localhost:8080/user/stehrn/mood
 [explicitly declare and isolate dependencies](https://12factor.net/dependencies) (12 factor)
 
 #### Libraries
-As engineers, most of us will know how to manage library dependencies (other binaries code references either directly or indirectly) using tools like maven, gradle (starting to beat maven in popularity), or Ivy for Java projects, Godep and Godm for Golang, and many more language specific tools. These are used to manage dependencies required by our application at build and runtime. 
+If you're an engineer, you'll likely know how to manage library dependencies (other binaries code references either directly or indirectly) using tools like maven, gradle (starting to beat maven in popularity), or Ivy for Java projects, Godep and Godm for Golang, and many more language specific tools. These are used to manage binary dependencies required by an application at build and runtime. 
 
-The service uses maven for dependencies management, defined in `dependencies` section of the [pom.xm](pom.xml), for example:
+The (mood) service uses [Apache maven](http://maven.apache.org) for dependencies management, defined in `dependencies` section of the [pom.xm](pom.xml), for example:
 
 ```xml
 <dependency>
@@ -52,9 +52,7 @@ The service uses maven for dependencies management, defined in `dependencies` se
 ```
 (_the version for this dependency, if you were wondering, is inherited from the parent pom_)
 
-TODO: add link to linked in maven article.
-
-maven will download this dependency to a local repo and add it to the classpath when compiling the source code; when packaging the project for deployment the binary will be added to the fat jar.   
+maven will download this dependency to a local repo and add it to the classpath when compiling the source code; when packaging the project for deployment the binary will be added to the fat jar (this [series of articles](https://cguntur.me/2020/05/23/understanding-apache-maven-part-1/) provides a good overview of maven).
  
 ## Codebase 
 [one codebase, many deploys](https://12factor.net/codebase) (12 factor)
@@ -62,14 +60,14 @@ maven will download this dependency to a local repo and add it to the classpath 
 The service lives in a single repo, and that repo only contains code for the mood service, nothing else.
   
 #### What to do with shared code  
-Given this is a small demo app, no code is shared yet, but if it was, then time would be spent refactoring it out into a new repo, and referencing it in the original app as a _library_ through dependency management. 
+Given this is a small demo app, no code is shared yet, but if it was, then time would be spent refactoring it out as a _library_ into a new repo, releasing a version to a binary repository, and referencing those binaries in the original app through the maven dependency management framework. 
  
-The new repo will have it's own build and release process allowing the library and the library clients to evolve at their own pace. This is all about reducing the risk of breaking something and will generally save time in the long run. Just be aware the code been refactored out should have a different velocity of change unrelated to the app - if the app and library are frequently released together then they're too coupled and probably should not have been separated.
+The shared library will have it's own build and release process, allowing the library and applications dependant on the library to evolve at their own pace. This is all about reducing the risk of breaking something in the library clients and will generally save time in the long run. Just be aware the code been refactored out should have a different velocity of change unrelated to the app - if the app and library are frequently released together then they're too coupled and probably should not have been separated.
 
 #### Versions 
 Use [git-flow](https://nvie.com/posts/a-successful-git-branching-model/) and [feature branches](https://martinfowler.com/bliki/FeatureBranch.html) to support different versions of the app in the same repo. The demo project makes use of feature branches to demonstrate some of the enhancements (normally feature branches would be merged back to master and deleted to keep things trim).          
 
-TODO: add link to branch
+TODO: git command to view branches?
 
 ## Config 
 [store config in the environment (not in the code)](https://12factor.net/config) (12 factor)
@@ -99,11 +97,11 @@ Spring also provides _config as a service_ via [Spring Cloud Config](https://clo
 ## Process and State
 [execute the app as one or more stateless processes](https://12factor.net/processes) (12 factor)
 
-State exists in the mood service, in the form of a simple in-process cache in [MoodService](src/main/java/com/github/stehrn/mood/MoodService.java) - so how to get this state out of the service process? The answer is to introduce a [backing service](https://12factor.net/backing-services) and store state there instead, backing services gets it's own section below, for now you just need to know it's any type of service the application consumes as part of it's normal operation and is typically defined via a simple 'connection string' (think URL).  
+State exists in the mood service, in the form of a simple in-process cache in [MoodService](src/main/java/com/github/stehrn/mood/MoodService.java). If we want to _scale out_ our process and create multiple instances to facilitate things like load balancing and application resilience, then having no state makes things much easier - just spin up another instance of the application process, with no need for the added complexities of ensuring cache coherence across replicated versions of the data in each process.  
 
-Why bother? If we want to _scale out_ our process and create multiple instances to facilitate things like load balancing and application resilience, then having no state makes things much easier - just spin up another instance of the application process. 
+So how to get state out of the service process? The answer is to introduce a [backing service](https://12factor.net/backing-services) and store state there instead, backing services gets it's own section below, for now you just need to know it's any type of service the application consumes as part of it's normal operation and is typically defined via a simple 'connection string' (think URL).  
 
-How do we do this for our app? Lets choose a cache - [redis](https://redis.io) is a good choice (alternatives might include Hazelcast or memcached), it's described as "an in-memory data structure store, used as a database, cache and message broker ... supports data structures such as strings, hashes, lists, sets, ..." ([redis.io](https://redis.io)). it's a great bit of opensource with a strong community, so lets use it.
+Lets choose a distributed cache - [redis](https://redis.io) is a good choice (alternatives might include Hazelcast or memcached), its an opensource project with a strong community, described as "an in-memory data structure store, used as a database, cache and message broker ... supports data structures such as strings, hashes, lists, sets, ..." ([redis.io](https://redis.io)). 
 
 #### Running redis on docker
 The quickest and easiest way to install and run redis is using docker, the [run](https://docs.docker.com/engine/reference/commandline/run/) command starts the redis container:
@@ -119,7 +117,7 @@ $ docker logs --follow mood-redis
 ```
 The log should show the message `Ready to accept connections`, default logging does not actually tell us much, so lets get a bit more interactive using the redis command line interface [(redis-cli)](https://redis.io/topics/rediscli). 
 
-To access redis-cli via docker, open an interactive (`it`) shell against the running redis container and run the `redis-cli` command:  
+To access redis-cli via docker, open an interactive (`-it`) shell (`sh`) against the running redis container and run the `redis-cli` command (`-c`):  
 ```cmd
 $ docker exec -it mood-redis sh -c redis-cli 
 ``` 
@@ -128,19 +126,19 @@ Use the [`monitor`](https://redis.io/topics/rediscli#monitoring-commands-execute
 #### Connecting Spring Boot to redis
 Lets replace the existing in memory cache with a redis cache using [Spring Data Redis](https://docs.spring.io/spring-data/data-redis/docs/current/reference/html/#reference).
 
-First fast forward to version of the app that has redis configured: 
+Go back to terminal the app is running in, stop it (`Ctrl-C`), and fast forward to version of the app that has redis configured: 
 ```cmd
 $ git checkout TODO
 $ mvn clean package
 ```
 
-Not many changes were required to introduce the redis cache:  
-* [`RedisConfig`](src/main/java/com/github/stehrn/mood/RedisConfig.java) provides relevant redis configuration information for Spring to connect to redis, including a `RedisTemplate` the Spring Data bean uses to interact with the Redis server and a `RedisConnectionFactory`
-* The addition of `@RedisHash("user")` to [`Mood`](src/main/java/com/github/stehrn/mood/Mood.java) tells Spring to store the mood entity in redis and not it's default `KeyValue` store 
+Not many changes were required to add the redis cache:  
+* [`RedisConfig`](src/main/java/com/github/stehrn/mood/RedisConfig.java) provides configuration information for Spring to connect to redis, including a `RedisTemplate` (the Spring Data bean uses to interact with the Redis server) and a `RedisConnectionFactory`
+* The addition of `@RedisHash("user")` to [`Mood`](src/main/java/com/github/stehrn/mood/Mood.java) tells Spring to store the mood entity in redis and not it's default in memory store 
 
-Start app:
+Start the app again:
 ```
-mvn spring-boot:run
+$ mvn spring-boot:run
 ```
 ...and set a new mood
 ```
