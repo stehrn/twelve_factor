@@ -9,12 +9,12 @@ public class MoodController {
     @Autowired
     private MoodService moodService;
 
-    @GetMapping("/user/{name}/mood")
+    @GetMapping("/mood/user/{name}")
     public Mood getMood(@PathVariable(value = "name") String name) {
         return moodService.getMood(name);
     }
 
-    @PutMapping("/user/{name}/mood")
+    @PutMapping("/mood/user/{name}")
     void setMood(@RequestBody String mood, @PathVariable String name) {
         moodService.setMood(name, mood);
     }

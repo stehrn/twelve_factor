@@ -31,10 +31,13 @@ $ mvn spring-boot:run
 ```
 ...then (in a separate terminal) set mood for a user (`stehrn`) and retrieve:
 ```cmd
-$ curl -X PUT -H "Content-Type: text/plain" -d "happy" http://localhost:8080/user/stehrn/mood 
-$ curl http://localhost:8080/user/stehrn/mood
+$ curl -X PUT -H "Content-Type: text/plain" -d "happy" http://localhost:8080/mood/user/stehrn 
+$ curl http://localhost:8080/mood/user/stehrn
 {"user":"stehrn","mood":"happy"}
 ```
+There's also a [swagger UI](https://swagger.io/tools/swagger-ui/) you can use to test the REST endpoints running at [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html), we'll continue to use `curl` in the examples, but use whatever you find easiest.
+
+![swagger](/images/swagger.png)
 
 ## Dependencies 
 [explicitly declare and isolate dependencies](https://12factor.net/dependencies) (12 factor)
@@ -87,7 +90,7 @@ We're in luck, Spring Boot will detect _environment variables_ (treating them as
  ```cmd
 $ export mood_not_found_message="no mood from environment"
 $ mvn spring-boot:run
-$ curl http://localhost:8080/user/stehrn/mood
+$ curl http://localhost:8080/mood/user/stehrn
 {... "status":404, "message":"no mood from environment"}
 ```
 Environment variables are easy to change and independent of programming language and development framework, and having configuration external to the code enables the same version of the binary to be deployed to each environment, just with different runtime configurations. 
@@ -142,10 +145,10 @@ $ mvn spring-boot:run
 ```
 ...and set a new mood
 ```
-$ curl -X PUT -H "Content-Type: text/plain" -d "liking redis" -i http://localhost:8080/user/stehrn/mood 
+$ curl -X PUT -H "Content-Type: text/plain" -d "liking redis" -i http://localhost:8080/mood/user/stehrn 
 HTTP/1.1 200 
 
-$ curl http://localhost:8080/user/stehrn/mood
+$ curl http://localhost:8080/mood/user/stehrn
 {"user":"stehrn","mood":"liking redis"}
 ``` 
 The redis monitor should show something like this:
@@ -165,7 +168,7 @@ $ mvn spring-boot:run
 ```
 ...and verify the same user mood can be sourced from the redis backing service:
 ```cmd
-$ curl http://localhost:8095/user/stehrn/mood
+$ curl http://localhost:8095/mood/user/stehrn
 {"user":"stehrn","mood":"liking redis!"}
 ```
  
@@ -280,13 +283,13 @@ At this point there are two containers running: a stateless (Spring Boot) servic
 
 Check the new default message injected via `ENV` command is observed:  
 ```cmd
-$ curl http://localhost:8080/user/stehrn/mood
+$ curl http://localhost:8080/mood/user/stehrn
 {..., "user":"stehrn","mood":"default for docker"}
 ``` 
 ..and why not test setting the mood again:
 ```cmd
-$ curl -X PUT -H "Content-Type: text/plain" -d "liking containers!" -i http://localhost:8080/user/stehrn/mood 
-$ curl http://localhost:8080/user/stehrn/mood
+$ curl -X PUT -H "Content-Type: text/plain" -d "liking containers!" -i http://localhost:8080/mood/user/stehrn 
+$ curl http://localhost:8080/mood/user/stehrn
 {"user":"stehrn","mood":"liking containers!"}
 ```
 (if you're feeling adventurous, use `docker network inspect new-mood-network` to check out the bridge network and how the containers are connected to it)
@@ -312,7 +315,7 @@ Tomcat started on port(s): 8080 (http)
 ```
 ...but externally we connect to the container process via it's published 8085 port:
 ```
-$ curl http://localhost:8085/user/stehrn/mood
+$ curl http://localhost:8085/mood/user/stehrn
 ```
 Remember to clean up with `docker rm --force mood-service-ports`
 
@@ -373,8 +376,8 @@ $ kubectl logs -l app=service --follow
 
 Once again test the service (note different port):
 ```cmd 
-$ curl -X PUT -H "Content-Type: text/plain" -d "happy with Kubernetes" http://localhost:30001/user/stehrn/mood 
-$ curl http://localhost:30001/user/stehrn/mood
+$ curl -X PUT -H "Content-Type: text/plain" -d "happy with Kubernetes" http://localhost:30001/mood/user/stehrn 
+$ curl http://localhost:30001/mood/user/stehrn
 {"user":"stehrn","mood":"happy with Kubernetes"}
 ```
 
@@ -570,7 +573,7 @@ $ kubectl autoscale deployment mood-service --cpu-percent=50 --min=1 --max=5
 ```cmd
 $ kubectl run -i --tty load-generator --image=busybox /bin/sh  
 Hit enter for command prompt  
-$ while true; do wget -q -O- http://localhost:30001/user/anon/mood; done
+$ while true; do wget -q -O- http://localhost:30001/mood/user/anon; done
 ```
 
  
@@ -579,7 +582,7 @@ Check out this nice [autoscaling blog](https://kubernetes.io/blog/2016/07/autosc
 ## Config and Kubernetes
 You may not have noticed but the Kubernetes instance of the service had a different default message:
 ```cmd 
-$ curl http://localhost:30001/user/anon/mood
+$ curl http://localhost:30001/mood/user/anon
 {... "status":404, "message":"default for Kubernetes"}
 ```
 It's been set in the Kubernetes config via a [container environment variable](https://kubernetes.io/docs/tasks/inject-data-application/define-environment-variable-container/): 
@@ -618,7 +621,7 @@ env:
 ``` 
 ...and test:
 ```cmd 
-$ curl http://localhost:30001/user/anon/mood
+$ curl http://localhost:30001/mood/user/anon
 {... "status":404, "message":"default for ConfigMaps"}
 ```
 
@@ -703,8 +706,8 @@ There's a nice 'topology view' you can toggle to by clicking icon in top right h
 So lets test the application, grab the public route (you can click on the ![Route](/images/route.png) icon to obtain) and test:
 ```cmd
 $ export ROUTE=http://mood-service-mood-board.apps.us-east-1.starter.openshift-online.com 
-$ curl -X PUT -H "Content-Type: text/plain" -d "happy with Openshift" ${ROUTE}/user/stehrn/mood 
-$ curl ${ROUTE}/user/stehrn/mood
+$ curl -X PUT -H "Content-Type: text/plain" -d "happy with Openshift" ${ROUTE}/mood/user/stehrn 
+$ curl ${ROUTE}/mood/user/stehrn
 {"user":"stehrn","mood":"happy with Openshift"}
 ```
 Now is the time to spend some time in the UI clicking about to see what features are available and reading the (very good) [OpenShift documentation](https://docs.openshift.com/online/).
