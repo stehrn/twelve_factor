@@ -15,7 +15,7 @@ public class SmokeTest {
     private MoodController controller;
 
     @Test
-    public void contexLoads() {
+    public void contextLoads() {
         assertThat(controller, is(notNullValue()));
     }
 }

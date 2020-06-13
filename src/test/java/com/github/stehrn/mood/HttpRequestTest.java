@@ -38,11 +38,11 @@ public class HttpRequestTest {
         String mood  = "happy";
         String user  = "stehrn";
 
-        restTemplate.put("http://localhost:" + port + "/user/" + user + "/mood", mood,
+        restTemplate.put("http://localhost:" + port + "/mood/user/" + user, mood,
                 String.class);
 
         Mood expected = new Mood(user, mood);
-        assertThat(restTemplate.getForObject("http://localhost:" + port + "/user/" + user + "/mood",
+        assertThat(restTemplate.getForObject("http://localhost:" + port + "/mood/user/" + user,
                 Mood.class)).isEqualTo(expected);
     }
 }
