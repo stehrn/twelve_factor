@@ -1,41 +1,54 @@
 # 12 factor apps in practice
 
-This is a practical look at [12 factor](https://12factor.net) apps and how to build them for real. 
+This is a practical look at [12 factor](https://12factor.net) apps and how to engineer them for real. 
 
-A simple Java microservice is evolved architecturally, from a single process app, to a multi process [Docker](https://www.docker.com) containerised app, first running on the container orchestration platform [Kubernetes](https://kubernetes.io), and then rolled out to Red Hat [OpenShift](https://www.openshift.com).
+A simple Java microservice is evolved architecturally, from a single process app, to a multi process [Docker](https://www.docker.com) containerised app leveraging a [redis](https://redis.io) cache, first running on the container orchestration platform [Kubernetes](https://kubernetes.io), and then rolled out to Red Hat [OpenShift](https://www.openshift.com).
 
-Its hands on, with all source available in [twelve_factor](https://github.com/stehrn/twelve_factor) GitHub repo, technical prerequisites:
+Its hands on, with exercises to work through, technical prerequisites:
 * JDK and maven are installed (along with a decent IDE like [IntelliJ](https://www.jetbrains.com/idea/))
 * Docker is [installed](https://docs.docker.com/get-docker/)
 
-Take a bit of time up-front to read the introductions to Docker containers and Kubernetes since these are used heavily and a basic understanding will help, whilst lots of links to more specifics are scattered throughout the blog.    
- 
+Take a bit of time up-front to read the introductions to Docker containers and Kubernetes, whilst lots of links to more specifics are scattered throughout the blog.    
+
 ## Introducing the mood service
-The mood service is the beginnings of a simple agile scrum _moodboard_, its a middle tier that exposes the following RESTful end-points to get and set the mood of the given user:
+The mood service is the beginnings of a simple agile scrum _moodboard_, its a middle tier that exposes the following RESTful end-points to set and get the mood of the given user:
 ```
-GET /mood/user/<user>
 PUT /mood/user/<user> <mood>
+GET /mood/user/<user>
 ```
 
-The ([Spring Boot](https://spring.io/projects/spring-boot)) Java app was quick and easy to implement, helped by [Spring Initializr](https://start.spring.io) which generated a base maven project. 
+The [Spring Boot](https://spring.io/projects/spring-boot) Java app was quick and easy to implement, helped by [Spring Initializr](https://start.spring.io) which generated a base maven project. The REST endpoints are exposed by the [MoodController](src/test/java/com/github/stehrn/mood/MoodController.java) and the cache entry point is the [MoodRepository](src/test/java/com/github/stehrn/mood/MoodRepository.java).
 
-First go back in time to initial version of the app:
+Get started by cloning the [mood-board](https://github.com/stehrn/mood-board) project:
+
 ```cmd
-$ git checkout tags/in_memory -b master
+$ git clone https://github.com/stehrn/mood-board.git
+``` 
+You'll be at the tip of the 'master' branch, first go back in time to the initial version of the app, which, as the name of the tag implies, has a simple in-memory cache (based on the [Spring Data Key-Value Repository](https://docs.spring.io/spring-data/keyvalue/docs/current/reference/html/#preface)) to store the mood data:
+```cmd
+$ cd mood-board
+$ git checkout in_memory_cache
 ```
-
-Run [HttpRequestTest](src/test/java/com/github/stehrn/mood/HttpRequestTest.java) to test the 2 end points, or test via `curl`, bring up service first, from the terminal:
+Build the application:
 ```cmd
 $ mvn package
+```
+This will also run the unit and integration tests, you know everything is working as expected if you see:
+```cmd
+[INFO] Tests run: 4, Failures: 0, Errors: 0, Skipped: 0
+```
+Now bring up the service:
+```cmd
 $ mvn spring-boot:run
 ```
-...then (in a separate terminal) set mood for a user (`stehrn`) and retrieve:
+
+In a separate terminal, set mood for a user (`stehrn`) and retrieve:
 ```cmd
 $ curl -X PUT -H "Content-Type: text/plain" -d "happy" http://localhost:8080/mood/user/stehrn 
 $ curl http://localhost:8080/mood/user/stehrn
 {"user":"stehrn","mood":"happy"}
 ```
-There's also a [swagger UI](https://swagger.io/tools/swagger-ui/) you can use to test the REST endpoints running at [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html), we'll continue to use `curl` in the examples, but use whatever you find easiest.
+There's also a [swagger UI](https://swagger.io/tools/swagger-ui/) you can use to test the endpoints running at [http://localhost:8080/swagger-ui.html](http://localhost:8080/swagger-ui.html), we'll continue to use `curl` in the examples, but use whatever you find easiest.
 
 ![swagger](/images/swagger.png)
 
@@ -45,17 +58,17 @@ There's also a [swagger UI](https://swagger.io/tools/swagger-ui/) you can use to
 #### Libraries
 If you're an engineer, you'll likely know how to manage library dependencies (other binaries code references either directly or indirectly) using tools like maven, gradle (starting to beat maven in popularity), or Ivy for Java projects, Godep and Godm for Golang, and many more language specific tools. These are used to manage binary dependencies required by an application at build and runtime. 
 
-The (mood) service uses [Apache maven](http://maven.apache.org) for dependencies management, defined in `dependencies` section of the [pom.xm](pom.xml), for example:
-
+The application uses [Apache maven](http://maven.apache.org) for dependencies management, for example, the code uses [lombok](https://projectlombok.org) annotations to reduce repetitive boilerplate code, the dependency to this library is defined in the `dependencies` section of the [pom.xm](pom.xml) as: 
 ```xml
 <dependency>
-  <groupId>org.springframework.boot</groupId>
-  <artifactId>spring-boot-starter-web</artifactId>
+  <groupId>org.projectlombok</groupId>
+  <artifactId>lombok</artifactId>
+  <version>1.18.8</version>
 </dependency>
 ```
-(_the version for this dependency, if you were wondering, is inherited from the parent pom_)
+(details on this and any other binary can be found on [mvnrepository.com](https://mvnrepository.com/artifact/org.projectlombok/lombok/1.18.8))
 
-maven will download this dependency to a local repo and add it to the classpath when compiling the source code; when packaging the project for deployment the binary will be added to the fat jar (this [series of articles](https://cguntur.me/2020/05/23/understanding-apache-maven-part-1/) provides a good overview of maven).
+If necessary, maven will download this dependency from a remote binary repository into a local repo, and add it to the classpath when compiling the source code; when packaging the application for deployment the binary will be added to the fat jar (this [series of articles](https://cguntur.me/2020/05/23/understanding-apache-maven-part-1/) provides a good overview of maven).
  
 ## Codebase 
 [one codebase, many deploys](https://12factor.net/codebase) (12 factor)
@@ -63,14 +76,18 @@ maven will download this dependency to a local repo and add it to the classpath 
 The service lives in a single repo, and that repo only contains code for the mood service, nothing else.
   
 #### What to do with shared code  
-Given this is a small demo app, no code is shared yet, but if it was, then time would be spent refactoring it out as a _library_ into a new repo, releasing a version to a binary repository, and referencing those binaries in the original app through the maven dependency management framework. 
+Given this is a small demo app, no code is shared yet, but if it was, then time would be spent refactoring it out as a _library_ into a new repo, releasing a version to a binary repository, and referencing the binary(s) in the original app through the dependency management framework. 
  
 The shared library will have it's own build and release process, allowing the library and applications dependant on the library to evolve at their own pace. This is all about reducing the risk of breaking something in the library clients and will generally save time in the long run. Just be aware the code been refactored out should have a different velocity of change unrelated to the app - if the app and library are frequently released together then they're too coupled and probably should not have been separated.
 
 #### Versions 
 Use [git-flow](https://nvie.com/posts/a-successful-git-branching-model/) and [feature branches](https://martinfowler.com/bliki/FeatureBranch.html) to support different versions of the app in the same repo. The demo project makes use of feature branches to demonstrate some of the enhancements (normally feature branches would be merged back to master and deleted to keep things trim).          
 
-TODO: git command to view branches?
+```cmd
+$ git branch -r
+  origin/config-map-container-env-variable
+  ...
+```
 
 ## Config 
 [store config in the environment (not in the code)](https://12factor.net/config) (12 factor)
@@ -86,7 +103,7 @@ private String moodNotFoundMessage;
 ```
 Right now it appears it's hard coded in the properties file, to change the value requires a rebuild of the app. But what if we wanted to have different configurations based on the deployment environment (e.g. development/test/production or some other variant)?     
 
-We're in luck, Spring Boot will detect _environment variables_ (treating them as properties), we just need to `export` the value before starting the process, kill the running app and then:
+We're in luck, Spring Boot will detect _environment variables_ (treating them as properties), we just need to `export` the value before starting the process - go back to terminal the app is running in, stop it (Ctrl-C), and then:
  ```cmd
 $ export mood_not_found_message="no mood from environment"
 $ mvn spring-boot:run
@@ -100,14 +117,14 @@ Spring also provides _config as a service_ via [Spring Cloud Config](https://clo
 ## Process and State
 [execute the app as one or more stateless processes](https://12factor.net/processes) (12 factor)
 
-State exists in the mood service, in the form of a simple in-process cache in [MoodService](src/main/java/com/github/stehrn/mood/MoodService.java). If we want to _scale out_ our process and create multiple instances to facilitate things like load balancing and application resilience, then having no state makes things much easier - just spin up another instance of the application process, with no need for the added complexities of ensuring cache coherence across replicated versions of the data in each process.  
+State exists in the mood service, in the form of a simple in-process cache. If we want to _scale out_ our process and create multiple instances to facilitate things like load balancing and application resilience, then having no state makes things much easier - just spin up another instance of the application process, with no need for the added complexities of ensuring cache coherence across replicated versions of the data in each process.  
 
 So how to get state out of the service process? The answer is to introduce a [backing service](https://12factor.net/backing-services) and store state there instead, backing services gets it's own section below, for now you just need to know it's any type of service the application consumes as part of it's normal operation and is typically defined via a simple 'connection string' (think URL).  
 
 Lets choose a distributed cache - [redis](https://redis.io) is a good choice (alternatives might include Hazelcast or memcached), its an opensource project with a strong community, described as "an in-memory data structure store, used as a database, cache and message broker ... supports data structures such as strings, hashes, lists, sets, ..." ([redis.io](https://redis.io)). 
 
 #### Running redis on docker
-The quickest and easiest way to install and run redis is using docker, the [run](https://docs.docker.com/engine/reference/commandline/run/) command starts the redis container:
+One of the quickest and easiest way to install and run redis is using docker, the [run](https://docs.docker.com/engine/reference/commandline/run/) command starts the redis container:
 ```cmd
 $ docker run --name mood-redis --publish 6379:6379 --detach redis
 ```
@@ -127,23 +144,23 @@ $ docker exec -it mood-redis sh -c redis-cli
 Use the [`monitor`](https://redis.io/topics/rediscli#monitoring-commands-executed-in-redis) command to actively monitor the commands running against redis - it will just print out `OK` to begin with, we'll see more once the service is connected to redis. 
 
 #### Connecting Spring Boot to redis
-Lets replace the existing in memory cache with a redis cache using [Spring Data Redis](https://docs.spring.io/spring-data/data-redis/docs/current/reference/html/#reference).
+Lets replace the existing in-memory cache with a redis cache using [Spring Data Redis](https://docs.spring.io/spring-data/data-redis/docs/current/reference/html/#reference).
 
-Go back to terminal the app is running in, stop it (`Ctrl-C`), and fast forward to version of the app that has redis configured: 
+Go back to terminal the app is running in and stop it, and fast forward to version of the app that has redis configured: 
 ```cmd
-$ git checkout in_memory_cache
+$ git checkout master
 $ mvn clean package
 ```
 
 Not many changes were required to add the redis cache:  
 * [`RedisConfig`](src/main/java/com/github/stehrn/mood/RedisConfig.java) provides configuration information for Spring to connect to redis, including a `RedisTemplate` (the Spring Data bean uses to interact with the Redis server) and a `RedisConnectionFactory`
-* The addition of `@RedisHash("user")` to [`Mood`](src/main/java/com/github/stehrn/mood/Mood.java) tells Spring to store the mood entity in redis and not it's default in memory store 
+* The addition of `@RedisHash("user")` to [`Mood`](src/main/java/com/github/stehrn/mood/Mood.java) tells Spring to store the mood entity in redis and not it's default in-memory store 
 
 Start the app again:
 ```
 $ mvn spring-boot:run
 ```
-...and set a new mood
+...and set a new mood:
 ```
 $ curl -X PUT -H "Content-Type: text/plain" -d "liking redis" -i http://localhost:8080/mood/user/stehrn 
 HTTP/1.1 200 
@@ -161,7 +178,7 @@ Two keys are added:
 * `user:stehrn` maps to a hash data structure containing the mood data; the [HMSET](https://redis.io/commands/hmset) command sets specified fields (`_class`, `user`, and `mood`) to their respective values. Note how redis also ensures any previous value is deleted via [DEL](https://redis.io/commands/del)  
 * `user` maps to a set containing unique users, [SADD](https://redis.io/commands/sadd) is used to add an item the set 
 
-Now, in a separate terminal, fire up a new service process on a different port to avoid a clash:
+Now, in a separate terminal, fire up a second instance of the service (on a different port to avoid a clash):
 ```
 $ export SERVER_PORT=8095
 $ mvn spring-boot:run
@@ -175,7 +192,11 @@ $ curl http://localhost:8095/mood/user/stehrn
 We now have two stateless services leveraging a redis backing service to store application state, nice!
 
 #### Sidebar: Back to redis-cli to check contents of store
-Go back to the redis-cli terminal (come out of monitor using Ctrl-C), to list all keys: 
+Go back to the redis-cli terminal (come out of monitor using Ctrl-C), and back into redis-cli:
+```cmd
+$ docker exec -it mood-redis sh -c redis-cli
+```
+List all keys: 
 ```
 > keys *
 1) "user:stehrn"
@@ -196,6 +217,8 @@ See all users:
 > SMEMBERS user
 1) "stehrn"
 ``` 
+
+TOOD: continue form here
 
 ## Backing Services  
 [treat backing services as attached resources](https://12factor.net/backing-services) (12 factor)
@@ -244,7 +267,7 @@ $ docker run --name mood-redis --network mood-network --net-alias redis-cache -p
 ``` 
 
 #### Create and run service container
-Now to create and run the service container - before starting, kill off any service instances running from a terminal to avoid port clashes. 
+Now to create and run the service container - before starting, kill off any service instances running from a terminal, you wont be using these any more. 
 
 Pre-requisite is that a far jar has been created for the app:
 ```cmd
@@ -255,7 +278,7 @@ The [Dockerfile](docker/Dockerfile) sources from the [openjdk 8 alpine](https://
 # Alpine Linux with OpenJDK JRE
 FROM openjdk:8-jre-alpine
 # copy WAR into image
-COPY demo-0.0.1-SNAPSHOT.jar /app.jar
+COPY mood-board-0.0.1-SNAPSHOT.jar /app.jar
 # set env variable
 ENV mood_not_found_message default for docker
 # run application with this command line
@@ -608,7 +631,7 @@ $ kubectl describe configmap
 ```
 Now get an alternative version of the deployment config, its on a different git branch:
 ```cmd
-git TODO
+git checkout config-map-container-env-variable
 ```
 The only difference is how the env variable is sourced into the container:
 ```cmd
@@ -686,7 +709,7 @@ Enter following details:
 ![Mood Service](/images/mood.png)
 
 Things of note:
-* Once the `https://github.com/stehrn/twelve_factor.git` git repo is entered the UI will automatically select the correct builder image (Java) 
+* Once the `https://github.com/stehrn/mood-board.git` git repo is entered the UI will automatically select the correct builder image (Java) 
 * 'Application' 'mood-app' is automatically selected, stick with it
 * Change 'Name' to 'mood-service'
 * We do want a Route creating as want a public URL we can connect to, so stick  with the default checked option
@@ -765,8 +788,7 @@ Openshift
 https://console-openshift-console.apps.us-east-1.starter.openshift-online.com/k8s/cluster/projects
 
 TODO
-mvn clean package
-DO tests work? 
+Do tests work? 
 
 
 
