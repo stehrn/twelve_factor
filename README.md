@@ -218,8 +218,6 @@ See all users:
 1) "stehrn"
 ``` 
 
-TOOD: continue form here
-
 ## Backing Services  
 [treat backing services as attached resources](https://12factor.net/backing-services) (12 factor)
 
@@ -227,7 +225,7 @@ The redis cache is an example of a backing service that was used to take state o
 
 The service knows nothing about the redis backing service - who owns it, how it was deployed, where it's running - it might be running on the same node in a separate container, it might be a managed [Azure Cache for Redis](https://azure.microsoft.com/en-gb/services/cache/) service hosted in a different region. The point it, it doesn't matter, it's a separation of concerns, each can be managed and deployed independently from each other.
 
-The service deployment can be easily configured to use a different redis instance simply by changing some environment properties - nothing else needs to be done. Lets quickly bring up an alternative version of redis and attach it to the app, we'll use the [alpine version](https://hub.docker.com/_/redis/) of redis that has a smaller image size (note it's bound to a different host port to avoid a port clash with the existing redis instance): 
+The service deployment can be easily configured to use a different redis instance simply by changing some environment properties - nothing else needs to be done. Lets quickly bring up an alternative version of redis and attach it to the app, we'll use the [alpine version](https://hub.docker.com/_/redis/) of redis that has a smaller image size (note we bind to a different host port to avoid a port clash with the existing redis instance), in a new terminal: 
 ```cmd
 $ docker run --name mood-redis-alpine -p 6380:6379 -d redis:6.0.3-alpine
 ```
@@ -238,7 +236,7 @@ $ mvn spring-boot:run -Dspring-boot.run.arguments=--spring.redis.port=6380
 ..and test as you did before (note since this is a brand new redis instance, it will have no data so you'll need to do a PUT then GET). 
 
 So with no code changes, just a change to an environment property, we've managed to attach a completely different version of the cache backing service!
-
+ 
 ## Containers and dependencies
 [explicitly declare and isolate dependencies](https://12factor.net/dependencies) (12 factor)
 
@@ -250,10 +248,10 @@ We've seen this first hand with the redis container - the image had _everything_
 
 What extra dependencies does the mood service have? Well, there's a system library dependency on the Java 1.8 runtime (JDK). So lets ship the app inside a container so we have 100% certainty it has everything that's needed for it to run as expected, regardless of the runtime environment - the container been run and tested on a dev blade should work just the same way on a production cluster.  
  
-## Running service on docker
+## Running the service on docker
 The redis container needs a bit of a retrofit first since we're now in the world of inter-container communication (networking) and need to configure things so the containers can communicate with each other.   
 
-#### Retrofit redis container so service container can connect 
+#### Retrofit redis container so service container can connect to it
 Lets make use of a user defined [bridge network](https://docs.docker.com/network/bridge/), it's good security practice as ensures only related services/containers can communicate with each other.
 
 Create a new network:
@@ -284,25 +282,31 @@ ENV mood_not_found_message default for docker
 # run application with this command line
 CMD ["/usr/bin/java", "-jar", "-Dspring.profiles.active=default", "/app.jar"]
 ``` 
-See [Docker instructions](https://docs.docker.com/engine/reference/builder/) for more detail.
+(see [Docker instructions](https://docs.docker.com/engine/reference/builder/) for a bit more more detail on these and other instructions)
 
-To [build](https://docs.docker.com/engine/reference/commandline/build/) the container image (called `mood-service`, tagged it with `1.0.0`) from the Dockerfile, run the following commands:
+To [build](https://docs.docker.com/engine/reference/commandline/build/) the container image from the Dockerfile, called `mood-service` and tagged it with `1.0.0`, run the following commands:
 ```cmd
 $ cd docker
 $ docker build --tag mood-service:1.0.0 .
 $ docker image ls mood-service
 REPOSITORY          TAG                 IMAGE ID            CREATED             SIZE
-mood-service        1.0.0               b06d5bb9f799        28 seconds ago      116MB
+mood-service        1.0.0               b06d5bb9f799        28 seconds ago      125MB
 ```
 Note the size, it's pretty big for such a simple app, we'll come back to that when looking at _disposability_.
 
-There's actually better ways to build the image, things have been kept simple here, but check out this [codefresh.io](https://codefresh.io/docker-tutorial/create-docker-images-for-java/) article that nicely summarised the pros and cons of different approaches. 
+There's actually better ways to build the image, things have been kept simple here, but check out this [codefresh.io](https://codefresh.io/docker-tutorial/create-docker-images-for-java/) article that nicely summarises the pros and cons of different approaches. 
 
 Next run a container named `mood-service` based on the new image, publish it's 8080 port so we can connect externally, and set the redis host property to the network alias of the `mood-redis` container: 
 ```cmd
 $ docker run --name mood-service --network mood-network -p 8080:8080 --env spring.redis.host=redis-cache -d mood-service:1.0.0
 ```
-At this point there are two containers running: a stateless (Spring Boot) service container and a redis container acting as a backing service. 
+At this point there are two containers running: a stateless (Spring Boot) service container and a redis container acting as a backing service, view them using [`ps`](https://docs.docker.com/engine/reference/commandline/ps/):
+```cmd
+$ docker ps -f name=mood*
+CONTAINER ID        IMAGE                    COMMAND                  CREATED              STATUS              PORTS                    NAMES
+20068ced2f06        mood-service:1.0.0       "/usr/bin/java -jar …"   About a minute ago   Up About a minute   0.0.0.0:8080->8080/tcp   mood-service
+d7669ed6ce04        redis                    "docker-entrypoint.s…"   26 minutes ago       Up 26 minutes       0.0.0.0:6379->6379/tcp   mood-redis
+``` 
 
 Check the new default message injected via `ENV` command is observed:  
 ```cmd
@@ -311,11 +315,11 @@ $ curl http://localhost:8080/mood/user/stehrn
 ``` 
 ..and why not test setting the mood again:
 ```cmd
-$ curl -X PUT -H "Content-Type: text/plain" -d "liking containers!" -i http://localhost:8080/mood/user/stehrn 
+$ curl -X PUT -H "Content-Type: text/plain" -d "liking containers" -i http://localhost:8080/mood/user/stehrn 
 $ curl http://localhost:8080/mood/user/stehrn
-{"user":"stehrn","mood":"liking containers!"}
+{"user":"stehrn","mood":"liking containers"}
 ```
-(if you're feeling adventurous, use `docker network inspect new-mood-network` to check out the bridge network and how the containers are connected to it)
+(if you're feeling adventurous, use `docker network inspect mood-network` to check out the bridge network and how the containers are connected to it)
 
 ## Port binding 
 [Export services via port binding](https://12factor.net/port-binding)  (12 factor)
@@ -340,33 +344,35 @@ Tomcat started on port(s): 8080 (http)
 ```
 $ curl http://localhost:8085/mood/user/stehrn
 ```
-Remember to clean up with `docker rm --force mood-service-ports`
+Remove running container with `docker rm --force mood-service-ports`
 
 So far we've been playing about in terminals using _localhost_, but in a UAT or production deployment, a public facing hostname and port will be used with some routing to route requests onto a server process listening on a non public host/port - we'll see this in action when we deploy to Openshift.
 
 ### Publish versus expose
-it's worth taking a step back and thinking about how we're currently connecting to the redis process - the service container is connecting to the redis container - i.e. container to container communication, so instead of publishing the redis port to the outside world we just need to expose it to the other container, this is safer from a security perspective, so lets kill the existing container and start with [`expose`](https://docs.docker.com/engine/reference/commandline/run/#publish-or-expose-port--p---expose) instead of `publish`:  
+It's worth taking a step back and thinking about how we're currently connecting to the redis process - the service container is connecting to the redis container - i.e. container to container communication, so instead of publishing the redis port to the outside world we just need to expose it to the other container, this is safer from a security perspective, so lets kill the existing container and start with [`expose`](https://docs.docker.com/engine/reference/commandline/run/#publish-or-expose-port--p---expose) instead of `publish`:  
 ```cmd
 $ docker rm --force mood-redis 
 $ docker run --name mood-redis --network mood-network --net-alias redis-cache --expose 6379 -d redis
 ```
 ...and test as before.
- 
+
 ## Declaring dependencies to other services
 Lets come back to [explicitly declare and isolate dependencies](https://12factor.net/dependencies) (12 factor)
 
-The service depends on the redis cache being available at runtime - how to ensure it's running and available? If we assume we are responsible for both the service and the redis cache, then we can manage their deployment and runtime operation using an orchestration framework like Kubernetes to assemble the service and redis containers and supporting infrastructure into a complete application.
+The service depends on the redis cache - how to ensure it's running and available at runtime? If we assume we are responsible for both the service and the redis cache, then we can manage their deployment and runtime operation using an orchestration framework like Kubernetes to assemble the service and redis containers and supporting infrastructure into a complete application.
 
-How we define the service and redis cache depends on how the application is architected. The simplest of distributed system patterns is the _single node_ pattern - defined as groups of containers co-located on a single machine. There are good use cases for this pattern - the [sidecar](https://docs.microsoft.com/en-us/azure/architecture/patterns/sidecar) pattern is a good example. 
+How we define the service and redis cache depends on how the application is architected. The simplest of distributed system patterns is the _single node_ pattern - defined as groups of containers co-located on a single machine; there are good use cases for this pattern - the [sidecar](https://docs.microsoft.com/en-us/azure/architecture/patterns/sidecar) pattern is a good example. 
 
 Do we want to run a cache on the same node/host as the service itself? Kubernetes allows each container to have its own guarantees around resource (CPU/memory) availability, but they'd still be on the same node, which raises concerns around availability - if the node goes down, everything goes down. Another concern is scalability, we can't easily scale if the containers are deployed together. Reliability, scalability and separation of concerns dictate that the application should be built out across multiple nodes - a _multi node_ pattern, and this is what we'll do. 
    
 ## Running application on Kubernetes
 Lets look at running the service and redis containers on Kubernetes. Before proceeding, kill off anything that's running either in your terminals or in background on docker, that's legacy now, we're moving on up to container orchestration!
 
-Docker Desktop includes a standalone [Kubernetes server](https://docs.docker.com/get-started/orchestration/) that runs on your machine, we're going to use this to manage the containers, and the `kubectl` (pronounced “cube CTL”, “kube control”) command line interface to run commands against Kubernetes. 
+Docker Desktop includes a standalone [Kubernetes server](https://docs.docker.com/get-started/orchestration/) that runs on your machine, we're going to use this and the `kubectl` (pronounced “cube CTL”, “kube control”) command line interface to run commands against Kubernetes. 
 
-Containers are scheduled as [`pods`](https://kubernetes.io/docs/concepts/workloads/pods/), which are groups of co-located containers that share some resources. Pods themselves are almost always scheduled as [`deployments`](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/), which are scalable groups of pods maintained automatically. A [service](https://kubernetes.io/docs/concepts/services-networking/service) abstraction defines a logical set of pods and a policy by which to access them - pods are mortal and can be restarted (e.g. if the process inside the container becomes non responsive), a service provides a consistent means for a client to access a pod.
+Some terminology. Containers are scheduled as [`pods`](https://kubernetes.io/docs/concepts/workloads/pods/), which are groups of co-located containers that share some resources. Pods themselves are almost always scheduled as [`deployments`](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/), which are scalable groups of pods maintained automatically. A [service](https://kubernetes.io/docs/concepts/services-networking/service) abstraction defines a logical set of pods and a policy by which to access them - pods are mortal and can be restarted (e.g. if the process inside the container becomes non responsive), a service provides a consistent means for a client to access a pod.
+
+TODO: diagram here?
 
 We decided to run things as a multi node pattern, this is achieved by putting the containers into separate deployments.    
 
@@ -379,9 +385,11 @@ All Kubernetes objects can be defined in YAML files, [mood-app.yaml](docker/mood
 * Deployment of mood service using `mood-service:1.0.0` image
 * [NodePort service](https://kubernetes.io/docs/concepts/services-networking/service/#nodeport), which will route traffic from port 8080 on the host to port 8080 inside the pods it routes to
 
+TODO: port is actually 30001
 
 Lets deploy the application to Kubernetes:
 ```cmd
+$ cd docker
 $ kubectl apply -f mood-app.yaml
 ```
 and check it's ready:
@@ -418,7 +426,12 @@ Open via [localhost link](http://localhost:8001/api/v1/namespaces/kubernetes-das
 $ kubectl -n kube-system describe secret default
 ```
 ..and you should see 
-TODO: image
+
+![Dashboard](/images/k8_dashboard.png)
+
+Try clicking into the mood-service pod, you can view events triggered to bring the pod up, view the logs or even open a shell onto the container (top right widget). Whether you find the dashboard useful or not depends on whether you prefer CLI versus clicking about in a UI, whilst it wont be of use in any automated tooling or CI/CD pipeline process. 
+
+TODO: from here
 
 ## Orchestration and process execution
 [execute the app as one or more stateless processes](https://12factor.net/processes) (12 factor)
